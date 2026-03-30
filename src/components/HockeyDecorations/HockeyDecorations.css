@@ -1,0 +1,46 @@
+.hockey-decorations {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.hockey-puck {
+  position: absolute;
+  width: 60px;
+  height: 24px;
+  background: rgba(2, 132, 199, 0.12);
+  border-radius: 50%;
+  border: 1px solid rgba(2, 132, 199, 0.25);
+}
+
+.hockey-puck-1 { top: 15%; left: 8%; --r: -15deg; animation: float 8s ease-in-out infinite; }
+.hockey-puck-2 { top: 25%; right: 12%; --r: 25deg; animation: float 10s ease-in-out infinite 1s; }
+.hockey-puck-3 { bottom: 30%; left: 15%; --r: 10deg; animation: float 9s ease-in-out infinite 2s; }
+.hockey-puck-4 { bottom: 20%; right: 8%; --r: -20deg; animation: float 11s ease-in-out infinite 0.5s; }
+.hockey-puck-5 { top: 50%; left: 5%; --r: 5deg; animation: float 7s ease-in-out infinite 1.5s; }
+
+.hockey-stick {
+  position: absolute;
+  width: 80px;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, rgba(2, 132, 199, 0.2), transparent);
+  border-radius: 2px;
+  transform-origin: left center;
+}
+
+.hockey-stick-1 { top: 20%; right: 20%; --r: -35deg; animation: float 12s ease-in-out infinite; }
+.hockey-stick-2 { bottom: 25%; left: 10%; --r: 45deg; animation: float 9s ease-in-out infinite 2s; }
+.hockey-stick-3 { top: 60%; right: 5%; --r: -10deg; animation: float 10s ease-in-out infinite 1s; }
+
+@keyframes float {
+  0%, 100% { transform: translateY(0) rotate(var(--r, 0deg)); }
+  50% { transform: translateY(-8px) rotate(var(--r, 0deg)); }
+}
+
+@media (max-width: 768px) {
+  .hockey-puck { width: 40px; height: 16px; }
+  .hockey-stick { width: 50px; }
+  .hockey-puck-4, .hockey-puck-5 { opacity: 0.5; }
+}

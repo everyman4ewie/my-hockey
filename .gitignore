@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+.DS_Store
+# База пользователей и досок на сервере — не перезаписывать при деплое из репозитория
+server/data.json
+server/admin.json
+server/data.json.bak
+server/admin.json.bak

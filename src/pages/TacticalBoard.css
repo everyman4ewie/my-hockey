@@ -1,0 +1,129 @@
+/* Шапка в потоке + grid: нижняя строка получает реальную высоту (minmax(0,1fr)) — холст заполняет экран */
+.tactical-board-page {
+  --tactical-header-h: 56px;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  max-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #f8fafc;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.tactical-board-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  padding-top: max(1rem, env(safe-area-inset-top, 0px));
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  position: relative;
+  z-index: 99;
+  flex-shrink: 0;
+}
+
+.tactical-board-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #0f172a;
+  margin: 0;
+}
+
+.tactical-board-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tactical-board-error {
+  color: #dc2626;
+  font-size: 0.9rem;
+}
+
+.tactical-board-canvas-wrap {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  padding-bottom: max(0, env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.tactical-board-canvas-wrap .hockey-board {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  height: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  /* padding-top под фиксированную панель задаётся из HockeyBoard по измеренной высоте */
+  padding-top: 0;
+  padding-bottom: 0;
+  box-sizing: border-box;
+}
+
+/* Панель под шапкой: top = измеренная высота шапки */
+.tactical-board-canvas-wrap .board-toolbar {
+  position: fixed;
+  top: var(--tactical-header-h, 56px);
+  left: 0;
+  right: 0;
+  z-index: 100;
+  flex-shrink: 0;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 768px) {
+  .tactical-board-canvas-wrap .hockey-board {
+    padding-top: 0;
+  }
+
+  .tactical-board-canvas-wrap .board-toolbar,
+  .tactical-board-canvas-wrap .board-toolbar-mobile-summary {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    z-index: 1;
+    box-shadow: none;
+  }
+
+  .tactical-board-header {
+    padding: 0.65rem 1rem;
+    padding-top: max(0.65rem, env(safe-area-inset-top, 0px));
+  }
+
+  .tactical-board-title {
+    font-size: 1.05rem;
+  }
+
+  .tactical-board-header-actions {
+    gap: 0.5rem;
+  }
+
+  .tactical-board-header-actions .btn-outline,
+  .tactical-board-header-actions .btn-primary {
+    padding: 0.45rem 0.75rem;
+    font-size: 0.85rem;
+  }
+}
+
+.tactical-board-canvas-wrap .board-canvas-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #e8f4fc;
+  padding: 0;
+  box-sizing: border-box;
+}

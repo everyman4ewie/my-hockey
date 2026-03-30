@@ -1,0 +1,1199 @@
+.cabinet {
+  min-height: 100vh;
+  display: flex;
+  position: relative;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  transition: background 0.4s ease;
+}
+
+.cabinet-ice {
+  background: linear-gradient(180deg, #e0f4fe 0%, #bae6fd 40%, #7dd3fc 100%);
+  background-image:
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(56, 189, 248, 0.2), transparent),
+    linear-gradient(180deg, #e0f4fe 0%, #bae6fd 50%, #7dd3fc 100%);
+}
+
+.cabinet-sidebar {
+  width: 260px;
+  min-height: 100vh;
+  background: rgba(255, 255, 255, 0.85);
+  border-right: 1px solid rgba(2, 132, 199, 0.2);
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem 0;
+  backdrop-filter: blur(12px);
+  position: relative;
+  z-index: 2;
+  transition: all 0.3s ease;
+}
+
+.cabinet-ice .cabinet-sidebar {
+  background: rgba(255, 255, 255, 0.9);
+  border-right-color: rgba(2, 132, 199, 0.25);
+}
+
+.cabinet-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 1rem;
+}
+
+.cabinet-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  color: #0369a1;
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 500;
+  transition: all 0.3s ease;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.cabinet-ice .cabinet-nav-item {
+  color: #0369a1;
+}
+
+.cabinet-nav-item:hover {
+  background: rgba(2, 132, 199, 0.12);
+  color: #0284c7;
+}
+
+.cabinet-nav-item.active {
+  background: rgba(2, 132, 199, 0.2);
+  color: #0284c7;
+}
+
+.cabinet-nav-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.cabinet-sidebar-footer {
+  margin-top: auto;
+  padding: 1rem 1rem 0;
+  border-top: 1px solid rgba(2, 132, 199, 0.2);
+}
+
+.cabinet-logout {
+  width: 100%;
+  padding: 10px 16px;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.cabinet-logout:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.cabinet-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 10;
+}
+
+.cabinet-header {
+  padding: 1.5rem 2rem;
+  background: rgba(255, 255, 255, 0.7);
+  border-bottom: 1px solid rgba(2, 132, 199, 0.2);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  backdrop-filter: blur(8px);
+  transition: all 0.3s ease;
+}
+
+.cabinet-ice .cabinet-header {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.cabinet-user-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.cabinet-avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid rgba(2, 132, 199, 0.4);
+  transition: border-color 0.3s ease;
+}
+
+.cabinet-avatar-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #fff;
+  transition: transform 0.3s ease;
+}
+
+.cabinet-header h1 {
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: #0c4a6e;
+}
+
+.cabinet-ice .cabinet-header h1 {
+  color: #0c4a6e;
+}
+
+.cabinet-email {
+  font-size: 0.9rem;
+  color: #0369a1;
+  margin-top: 2px;
+}
+
+.cabinet-admin-link {
+  padding: 8px 16px;
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: all 0.3s ease;
+}
+
+.cabinet-admin-link:hover {
+  background: rgba(2, 132, 199, 0.25);
+}
+
+.cabinet-main {
+  flex: 1;
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+.cabinet-section {
+  max-width: 720px;
+}
+
+.cabinet-profile {
+  position: relative;
+  z-index: 1;
+}
+
+.cabinet-profile .form-row input,
+.cabinet-profile .form-row select {
+  pointer-events: auto;
+  cursor: text;
+}
+
+.cabinet-profile .form-row input[type="date"] {
+  cursor: pointer;
+}
+
+.cabinet-section h2 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #0c4a6e;
+  margin-bottom: 1.5rem;
+  transition: color 0.3s ease;
+}
+
+.cabinet-ice .cabinet-section h2 {
+  color: #0c4a6e;
+}
+
+.cabinet-section h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0369a1;
+  margin: 2rem 0 1rem;
+}
+
+.cabinet-muted {
+  color: #0369a1;
+}
+
+.cabinet-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.cabinet-form-compact {
+  max-width: 400px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-row label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #0c4a6e;
+}
+
+.cabinet-ice .form-row label {
+  color: #0c4a6e;
+}
+
+.form-row input {
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(2, 132, 199, 0.3);
+  border-radius: 8px;
+  color: #0c4a6e;
+  font-size: 0.95rem;
+  transition: all 0.3s ease;
+}
+
+.cabinet-ice .form-row input {
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(2, 132, 199, 0.35);
+  color: #0c4a6e;
+}
+
+.form-row input:focus {
+  outline: none;
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.2);
+}
+
+.form-row input::placeholder {
+  color: #64748b;
+}
+
+.form-row input.form-input-readonly,
+.form-row input[readonly] {
+  background: rgba(2, 132, 199, 0.08);
+  color: #0369a1;
+  cursor: default;
+}
+
+.form-row-photos {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2rem;
+}
+
+.photo-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.photo-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.photo-preview {
+  width: 120px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid rgba(2, 132, 199, 0.3);
+  transition: border-color 0.3s ease;
+}
+
+.photo-placeholder {
+  width: 120px;
+  height: 120px;
+  background: rgba(2, 132, 199, 0.1);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0369a1;
+  font-size: 0.85rem;
+}
+
+.photo-upload-btn {
+  padding: 8px 16px;
+  background: rgba(2, 132, 199, 0.15);
+  color: #0284c7;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.photo-upload-btn:hover {
+  background: rgba(2, 132, 199, 0.25);
+}
+
+.cabinet-error {
+  color: #dc2626;
+  font-size: 0.9rem;
+}
+
+.cabinet-success {
+  color: #059669;
+  font-size: 0.9rem;
+}
+
+.btn-primary {
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  transform: translateY(-1px);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  padding: 10px 20px;
+  background: transparent;
+  color: #0284c7;
+  border: 1px solid rgba(2, 132, 199, 0.5);
+  border-radius: 8px;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: rgba(2, 132, 199, 0.12);
+}
+
+.cabinet-password-section {
+  margin-top: 2rem;
+  padding-top: 2rem;
+  border-top: 1px solid rgba(2, 132, 199, 0.2);
+}
+
+.cabinet-plans-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.cabinet-plans-header h2 {
+  margin-bottom: 0;
+}
+
+.cabinet-plans-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.plans-filter {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.plans-filter button {
+  padding: 0.5rem 1rem;
+  border: 1px solid rgba(2, 132, 199, 0.4);
+  background: transparent;
+  color: #0369a1;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.plans-filter button:hover {
+  background: rgba(2, 132, 199, 0.08);
+}
+
+.plans-filter button.active {
+  background: #0284c7;
+  color: #fff;
+  border-color: #0284c7;
+}
+
+.cabinet-empty-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cabinet-loading,
+.cabinet-empty {
+  color: #0369a1;
+  text-align: center;
+  padding: 3rem 2rem;
+}
+
+.cabinet-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.plan-card {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(2, 132, 199, 0.25);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: all 0.3s ease;
+}
+
+.cabinet-ice .plan-card {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: rgba(2, 132, 199, 0.3);
+}
+
+.plan-card:hover {
+  border-color: rgba(2, 132, 199, 0.5);
+  box-shadow: 0 8px 24px rgba(2, 132, 199, 0.15);
+  transform: translateY(-2px);
+}
+
+.plan-card-link {
+  flex: 1;
+  text-decoration: none;
+  color: inherit;
+}
+
+.plan-card-link:hover {
+  text-decoration: none;
+}
+
+.plan-card h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0c4a6e;
+  margin-bottom: 4px;
+  transition: color 0.3s ease;
+}
+
+.plan-card-link:hover h3 {
+  color: #0284c7;
+}
+
+.plan-date {
+  font-size: 0.85rem;
+  color: #0369a1;
+}
+
+/* Пометка для тактической доски */
+.plan-card-board .plan-card-link::before {
+  content: '(Тактическая доска)';
+  display: block;
+  font-size: 0.75rem;
+  color: #0284c7;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+/* Пометка для план-конспекта */
+.plan-card:not(.plan-card-board) .plan-card-link::before {
+  content: '(План-конспект)';
+  display: block;
+  font-size: 0.75rem;
+  color: #0284c7;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.btn-delete {
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+  color: #dc2626;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  align-self: flex-start;
+}
+
+.btn-delete:hover {
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* Fallback for non-ice theme (e.g. when cabinet is used without cabinet-ice) */
+.cabinet:not(.cabinet-ice) .cabinet-sidebar {
+  background: rgba(30, 41, 59, 0.95);
+  border-right-color: rgba(51, 65, 85, 0.8);
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-nav-item {
+  color: #94a3b8;
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-nav-item:hover {
+  background: rgba(14, 165, 233, 0.1);
+  color: #e0f2fe;
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-nav-item.active {
+  background: rgba(14, 165, 233, 0.2);
+  color: #0ea5e9;
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-header {
+  background: rgba(15, 23, 42, 0.6);
+  border-bottom-color: rgba(51, 65, 85, 0.5);
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-header h1 {
+  color: #f1f5f9;
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-email {
+  color: #94a3b8;
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-section h2 {
+  color: #f1f5f9;
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-section h3 {
+  color: #e2e8f0;
+}
+
+.cabinet:not(.cabinet-ice) .cabinet-muted,
+.cabinet:not(.cabinet-ice) .cabinet-loading,
+.cabinet:not(.cabinet-ice) .cabinet-empty {
+  color: #94a3b8;
+}
+
+.cabinet:not(.cabinet-ice) .form-row label {
+  color: #cbd5e1;
+}
+
+.cabinet:not(.cabinet-ice) .form-row input {
+  background: rgba(30, 41, 59, 0.8);
+  border-color: rgba(51, 65, 85, 0.8);
+  color: #f1f5f9;
+}
+
+.cabinet:not(.cabinet-ice) .form-row input:focus {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
+}
+
+.cabinet:not(.cabinet-ice) .photo-placeholder {
+  background: rgba(51, 65, 85, 0.5);
+  color: #64748b;
+}
+
+.cabinet:not(.cabinet-ice) .photo-upload-btn {
+  background: rgba(14, 165, 233, 0.2);
+  color: #0ea5e9;
+}
+
+.cabinet:not(.cabinet-ice) .photo-upload-btn:hover {
+  background: rgba(14, 165, 233, 0.3);
+}
+
+.cabinet:not(.cabinet-ice) .btn-primary {
+  background: #0ea5e9;
+}
+
+.cabinet:not(.cabinet-ice) .btn-primary:hover:not(:disabled) {
+  background: #0284c7;
+}
+
+.cabinet:not(.cabinet-ice) .btn-outline {
+  color: #0ea5e9;
+  border-color: rgba(14, 165, 233, 0.5);
+}
+
+.cabinet:not(.cabinet-ice) .btn-outline:hover:not(:disabled) {
+  background: rgba(14, 165, 233, 0.1);
+}
+
+.cabinet:not(.cabinet-ice) .plan-card {
+  background: rgba(30, 41, 59, 0.6);
+  border-color: rgba(51, 65, 85, 0.6);
+}
+
+.cabinet:not(.cabinet-ice) .plan-card:hover {
+  border-color: rgba(14, 165, 233, 0.4);
+}
+
+.cabinet:not(.cabinet-ice) .plan-card h3 {
+  color: #f1f5f9;
+}
+
+.cabinet:not(.cabinet-ice) .plan-card-link:hover h3 {
+  color: #0ea5e9;
+}
+
+.cabinet:not(.cabinet-ice) .plan-date {
+  color: #94a3b8;
+}
+
+@media (max-width: 768px) {
+  .cabinet {
+    flex-direction: column;
+  }
+
+  .cabinet-sidebar {
+    width: 100%;
+    min-height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 1rem;
+    gap: 0.5rem;
+  }
+
+  .cabinet-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 0;
+  }
+
+  .cabinet-nav-item {
+    padding: 8px 12px;
+    font-size: 0.9rem;
+  }
+
+  .cabinet-sidebar-footer {
+    margin-top: 0;
+    padding: 0;
+    border: none;
+  }
+
+  .cabinet-logout {
+    width: auto;
+  }
+
+  .cabinet-tariffs-title {
+    font-size: 1.5rem;
+  }
+
+  .cabinet-tariffs-current-badge {
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  .cabinet-tariffs-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .tariff-period-toggle button {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+  }
+}
+
+/* Тариф рядом с логином */
+.cabinet-title-with-tariff {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.cabinet-tariff-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: rgba(2, 132, 199, 0.2);
+  color: #0284c7;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
+}
+
+/* Секция тарифов / Оплата */
+.cabinet-tariffs {
+  max-width: 1100px;
+  padding-bottom: 2rem;
+}
+
+.cabinet-tariffs-hero {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.cabinet-tariffs-title {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #0c4a6e;
+  margin: 0 0 0.5rem 0;
+  letter-spacing: -0.02em;
+}
+
+.cabinet-tariffs-subtitle {
+  font-size: 1.05rem;
+  color: #0369a1;
+  margin: 0 0 1.5rem 0;
+  line-height: 1.5;
+}
+
+.cabinet-tariffs-current-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.15), rgba(2, 132, 199, 0.08));
+  border: 1px solid rgba(2, 132, 199, 0.35);
+  border-radius: 14px;
+  font-size: 0.95rem;
+  color: #0c4a6e;
+  box-shadow: 0 4px 20px rgba(2, 132, 199, 0.1);
+}
+
+.cabinet-tariffs-current-badge svg {
+  flex-shrink: 0;
+  color: #0284c7;
+}
+
+.cabinet-tariffs-current-badge strong {
+  color: #0284c7;
+}
+
+.cabinet-tariffs-expiry {
+  margin-left: 0.5rem;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.cabinet-subscription-panel {
+  max-width: 640px;
+  margin: 0 auto 2rem;
+  padding: 1.25rem 1.5rem;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(2, 132, 199, 0.28);
+  border-radius: 14px;
+  text-align: left;
+}
+
+.cabinet-subscription-panel-title {
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #0c4a6e;
+}
+
+.cabinet-subscription-row {
+  margin-bottom: 0.5rem;
+}
+
+.cabinet-subscription-text {
+  margin: 0 0 0.75rem;
+  line-height: 1.55;
+  color: #334155;
+  font-size: 0.95rem;
+}
+
+.cabinet-subscription-cancel {
+  margin-top: 0.25rem;
+}
+
+.cabinet-subscription-details {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(2, 132, 199, 0.15);
+}
+
+.cabinet-subscription-details summary {
+  cursor: pointer;
+  color: #0369a1;
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.cabinet-subscription-details summary::-webkit-details-marker {
+  margin-right: 0.35rem;
+}
+
+.cabinet-subscription-note {
+  margin: 0.75rem 0 0;
+  font-size: 0.88rem;
+  color: #64748b;
+  line-height: 1.55;
+}
+
+.cabinet-tariffs .cabinet-muted {
+  margin-bottom: 1.5rem !important;
+  font-size: 0.95rem;
+}
+
+.cabinet-tariffs .cabinet-muted strong {
+  color: #0284c7;
+}
+
+.tariff-period-discount {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 2px 6px;
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border-radius: 6px;
+  vertical-align: middle;
+}
+
+/* Переключатель месяц/год */
+.tariff-period-toggle-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 2rem;
+}
+
+.cabinet-tariffs .tariff-period-toggle {
+  display: inline-flex;
+}
+
+.tariff-period-toggle,
+.tariffs-period-toggle {
+  display: inline-flex;
+  gap: 0;
+  margin-bottom: 2rem;
+  background: rgba(2, 132, 199, 0.08);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid rgba(2, 132, 199, 0.2);
+}
+
+.tariff-period-toggle button,
+.tariffs-period-toggle button {
+  padding: 0.6rem 1.5rem;
+  border: none;
+  background: transparent;
+  color: #0369a1;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.tariff-period-toggle button:hover,
+.tariffs-period-toggle button:hover {
+  color: #0284c7;
+}
+
+.tariff-period-toggle button.active,
+.tariffs-period-toggle button.active {
+  background: #fff;
+  color: #0284c7;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.2);
+}
+
+/* Сетка тарифов */
+.cabinet-tariffs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+}
+
+/* Карточка тарифа */
+.tariff-card {
+  background: #fff;
+  border: 1px solid rgba(2, 132, 199, 0.2);
+  border-radius: 16px;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.tariff-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: rgba(2, 132, 199, 0.3);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.tariff-card:hover {
+  border-color: rgba(2, 132, 199, 0.4);
+  box-shadow: 0 12px 40px rgba(2, 132, 199, 0.12);
+  transform: translateY(-2px);
+}
+
+.tariff-card:hover::before {
+  opacity: 1;
+}
+
+.tariff-card-pro,
+.tariff-card.pro {
+  border-color: rgba(2, 132, 199, 0.3);
+}
+
+.tariff-card-pro::before,
+.tariff-card.pro::before {
+  background: linear-gradient(90deg, #0284c7, #0ea5e9);
+  opacity: 0;
+}
+
+.tariff-card-pro:hover::before,
+.tariff-card.pro:hover::before {
+  opacity: 1;
+}
+
+.tariff-card-enterprise,
+.tariff-card.enterprise {
+  border-color: rgba(139, 92, 246, 0.25);
+}
+
+.tariff-card-enterprise::before,
+.tariff-card.enterprise::before {
+  background: linear-gradient(90deg, #8b5cf6, #6366f1);
+  opacity: 0;
+}
+
+.tariff-card-enterprise:hover::before,
+.tariff-card.enterprise:hover::before {
+  opacity: 1;
+}
+
+.tariff-card-unlimited,
+.tariff-card.unlimited {
+  border-color: rgba(34, 197, 94, 0.25);
+}
+
+.tariff-card-unlimited::before,
+.tariff-card.unlimited::before {
+  background: linear-gradient(90deg, #10b981, #059669);
+  opacity: 0;
+}
+
+.tariff-card-unlimited:hover::before,
+.tariff-card.unlimited:hover::before {
+  opacity: 1;
+}
+
+.tariff-card-free,
+.tariff-card.free {
+  border-color: rgba(100, 116, 139, 0.25);
+}
+
+.tariff-card-free::before,
+.tariff-card.free::before {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+  opacity: 0;
+}
+
+.tariff-card-free:hover::before,
+.tariff-card.free:hover::before {
+  opacity: 1;
+}
+
+.tariff-card-current {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.25), 0 8px 32px rgba(2, 132, 199, 0.15);
+}
+
+.tariff-card-current::before {
+  opacity: 1;
+  height: 4px;
+  background: linear-gradient(90deg, #0284c7, #0ea5e9);
+}
+
+.tariff-card-popular {
+  border-color: rgba(2, 132, 199, 0.4);
+  box-shadow: 0 4px 24px rgba(2, 132, 199, 0.12);
+}
+
+.tariff-card-popular::after {
+  content: 'Популярный';
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 4px 10px;
+  background: linear-gradient(135deg, #0284c7, #0ea5e9);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 600;
+  border-radius: 8px;
+  letter-spacing: 0.03em;
+}
+
+.tariff-badge {
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tariff-badge-free {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.2), rgba(100, 116, 139, 0.1));
+  color: #475569;
+}
+
+.tariff-badge-pro {
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.2), rgba(2, 132, 199, 0.1));
+  color: #0284c7;
+}
+
+.tariff-badge-enterprise {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(139, 92, 246, 0.1));
+  color: #7c3aed;
+}
+
+.tariff-badge-unlimited {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.1));
+  color: #059669;
+}
+
+.tariff-card h3 {
+  font-size: 1.25rem;
+  color: #0c4a6e;
+  margin: 0 0 0.25rem 0;
+}
+
+.tariff-desc {
+  font-size: 0.9rem;
+  color: #0369a1;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.tariff-price {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #0c4a6e;
+  margin: 0.25rem 0;
+}
+
+.tariff-price span {
+  font-variant-numeric: tabular-nums;
+}
+
+.tariff-features {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  flex: 1;
+}
+
+.tariff-features li {
+  padding: 0.4rem 0;
+  padding-left: 1.5rem;
+  position: relative;
+  color: #0369a1;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.tariff-features li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: #10b981;
+  font-weight: 700;
+}
+
+.tariff-card .btn-primary.btn-large {
+  margin-top: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  border-radius: 10px;
+  transition: all 0.25s;
+}
+
+.tariff-card .btn-primary.btn-large:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(2, 132, 199, 0.35);
+}
+
+.tariff-current-label {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  background: rgba(2, 132, 199, 0.1);
+  color: #0284c7;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: 8px;
+  margin-top: 0.5rem;
+}
+
+.tariff-unavailable {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  color: #64748b;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.cabinet-tariff-card {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(2, 132, 199, 0.25);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.cabinet-tariff-card.current {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.3);
+}
+
+.cabinet-tariff-badge-small {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.cabinet-tariff-badge-small.pro { background: rgba(2, 132, 199, 0.2); color: #0284c7; }
+.cabinet-tariff-badge-small.enterprise { background: rgba(139, 92, 246, 0.2); color: #8b5cf6; }
+.cabinet-tariff-badge-small.unlimited { background: rgba(34, 197, 94, 0.2); color: #16a34a; }

@@ -1,0 +1,157 @@
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/* Регистрация: без хоккейного курсора — стандартные системные курсоры по всей форме */
+.auth-page--register,
+.auth-page--register * {
+  cursor: default !important;
+}
+
+.auth-page--register a,
+.auth-page--register button:not(:disabled),
+.auth-page--register label[for] {
+  cursor: pointer !important;
+}
+
+.auth-page--register button:disabled {
+  cursor: not-allowed !important;
+}
+
+.auth-page--register input[type='email'],
+.auth-page--register input[type='text'],
+.auth-page--register input[type='password'] {
+  cursor: text !important;
+}
+
+.auth-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 400px;
+}
+
+.auth-card h1 {
+  margin-bottom: 0.5rem;
+  font-size: 1.75rem;
+}
+
+.auth-hint {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+}
+
+.auth-card form label {
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.auth-card form label span,
+.auth-card form label strong {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.9rem;
+}
+
+/* Не трогаем чекбокс/радио общими стилями — иначе ломается клик и виджет */
+.auth-card form input:not([type="checkbox"]):not([type="radio"]) {
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.auth-card form input:not([type="checkbox"]):not([type="radio"]):focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.captcha-label strong {
+  display: inline;
+}
+
+.auth-error {
+  color: #ef4444;
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.auth-card form button {
+  width: 100%;
+  padding: 0.75rem;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  margin-top: 0.5rem;
+}
+
+.auth-card form button:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.auth-card form button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* div + input + label[for]: не использовать <label> обёртку — иначе .auth-card form label ломает flex и клик */
+.auth-checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.auth-checkbox-input[type='checkbox'] {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  min-height: 1.15rem;
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  accent-color: var(--accent);
+  position: relative;
+  z-index: 1;
+}
+
+.auth-checkbox-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.auth-checkbox-text a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.auth-checkbox-text a:hover {
+  color: var(--accent-hover);
+}
+
+.auth-link {
+  margin-top: 1.5rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}

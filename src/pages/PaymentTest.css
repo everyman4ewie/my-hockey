@@ -1,0 +1,301 @@
+/* Переопределяем глобальную тему (body color: #f1f5f9) — на белом фоне нужен тёмный текст */
+.payment-ykassa-note {
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #475569;
+  margin-bottom: 1rem;
+}
+
+.payment-test-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #0f172a !important;
+}
+
+/* Принудительно тёмный текст для всего контента — перекрывает body { color: var(--text) } */
+.payment-test-page .payment-test-container,
+.payment-test-page .payment-test-container *:not(.payment-test-btn) {
+  color: #0f172a !important;
+}
+
+.payment-test-page .payment-test-container .payment-test-btn {
+  color: #fff !important;
+}
+
+.payment-test-container {
+  background: #fff;
+  border-radius: 16px;
+  color: #0f172a;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
+  max-width: 560px;
+  width: 100%;
+  padding: 32px;
+}
+
+/* Принудительно тёмный текст — перекрывает глобальную тему body { color: #f1f5f9 } */
+.payment-test-container,
+.payment-test-container * {
+  color: #0f172a !important;
+}
+.payment-test-container .payment-test-btn {
+  color: #fff !important;
+}
+.payment-test-container .payment-test-subtitle,
+.payment-test-container .payment-test-safe,
+.payment-test-container .payment-test-back {
+  color: #475569 !important;
+}
+.payment-test-container .payment-test-back:hover {
+  color: #0284c7 !important;
+}
+
+.payment-test-header {
+  margin-bottom: 28px;
+}
+
+.payment-test-header h1 {
+  margin: 0 0 6px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.payment-test-subtitle {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.payment-test-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.payment-test-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.payment-test-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.payment-methods-title {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.payment-methods {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.payment-method {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.payment-method:hover {
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.payment-method.active {
+  border-color: #0284c7;
+  background: #e0f2fe;
+  color: #0f172a !important;
+  font-weight: 600;
+}
+
+/* Переопределение глобальной светлой темы */
+.payment-method,
+.payment-method span,
+.payment-method-icon {
+  color: #0f172a !important;
+}
+
+.payment-method input {
+  display: none;
+}
+
+.payment-method-icon {
+  font-size: 1.25rem;
+  width: 28px;
+  text-align: center;
+  color: inherit;
+}
+
+/* Явно переопределяем цвет — глобальная тема даёт светлый текст на белом фоне */
+.payment-test-container .payment-method,
+.payment-test-container .payment-method span,
+.payment-test-container .summary-item,
+.payment-test-container .summary-item span,
+.payment-test-container .summary-total,
+.payment-test-container .summary-total span,
+.payment-test-container .payment-methods-title,
+.payment-test-container .payment-test-summary h3 {
+  color: #0f172a !important;
+}
+
+.payment-test-btn {
+  color: #fff !important;
+}
+
+.card-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+.card-fields .form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #1e293b !important;
+}
+
+.payment-test-container input {
+  color: #0f172a !important;
+}
+
+.form-group input {
+  padding: 12px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+.payment-test-btn {
+  margin-top: 8px;
+  padding: 14px 24px;
+  background: #0284c7;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.payment-test-btn:hover {
+  background: #0369a1;
+}
+
+.payment-test-sidebar {
+  background: #f1f5f9;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.payment-test-summary h3 {
+  margin: 0 0 16px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 8px;
+  font-size: 0.9rem;
+  color: #0f172a;
+  font-weight: 500;
+}
+
+.summary-item span {
+  color: #0f172a;
+}
+
+.summary-total {
+  display: flex;
+  justify-content: space-between;
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid #cbd5e1;
+  font-weight: 700;
+  font-size: 1rem;
+  color: #0f172a;
+}
+
+.summary-total span {
+  color: #0f172a;
+}
+
+.payment-test-safe {
+  margin: 16px 0 0;
+  font-size: 0.8rem;
+  color: #64748b;
+}
+
+.payment-test-back {
+  margin-top: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #64748b;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.payment-test-back:hover {
+  color: #0284c7;
+}
+
+@media (min-width: 640px) {
+  .payment-test-container {
+    max-width: 640px;
+  }
+  .payment-test-layout {
+    flex-direction: row;
+  }
+  .payment-test-main {
+    flex: 1;
+  }
+  .payment-test-sidebar {
+    min-width: 200px;
+  }
+}

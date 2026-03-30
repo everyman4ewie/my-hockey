@@ -1,0 +1,35 @@
+{
+  "name": "hockey-tactics",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:all": "concurrently -n \"vite,api\" -c \"cyan,magenta\" \"npm run dev\" \"npm run server\"",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/index.js",
+    "server:fresh": "lsof -ti:3002 | xargs kill -9 2>/dev/null; node server/index.js",
+    "start": "npm run build && node server/index.js",
+    "deploy:build": "bash scripts/deploy-production.sh"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5",
+    "docx": "^9.6.1",
+    "express": "^4.18.2",
+    "file-saver": "^2.0.5",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
+    "lucide-react": "^0.577.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.20.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.0",
+    "concurrently": "^9.1.2",
+    "vite": "^5.0.0"
+  }
+}

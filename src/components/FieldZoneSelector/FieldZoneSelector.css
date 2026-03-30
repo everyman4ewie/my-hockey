@@ -1,0 +1,81 @@
+.field-zone-select-wrap {
+  position: relative;
+}
+
+.field-zone-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  color: #0f172a;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.field-zone-trigger:hover {
+  border-color: #cbd5e1;
+}
+
+.field-zone-trigger svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: transform 0.2s;
+}
+
+.field-zone-trigger svg.open {
+  transform: rotate(180deg);
+}
+
+.field-zone-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 220px;
+  max-height: min(50vh, 280px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 200;
+}
+
+.field-zone-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  border: none;
+  background: #fff;
+  color: #0f172a;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.field-zone-option:hover {
+  background: #f8fafc;
+}
+
+.field-zone-option.selected {
+  background: #b45309;
+  color: #fff;
+}
+
+.field-zone-option.selected:hover {
+  background: #9a3d07;
+}
+
+.field-zone-option svg {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}

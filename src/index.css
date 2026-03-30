@@ -1,0 +1,101 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  cursor: url('/cursor-hockey.svg') 0 0, auto;
+}
+
+a, button, [role="button"], input[type="submit"], input[type="button"], input[type="radio"], select, label[for] {
+  cursor: url('/cursor-hockey.svg') 0 0, pointer;
+}
+
+/* Чекбоксы: хоккейный курсор по умолчанию, кроме блока согласия на регистрации (см. Auth.css) */
+input[type='checkbox'] {
+  cursor: url('/cursor-hockey.svg') 0 0, pointer;
+}
+
+/* Обычный курсор в редакторе план-конспектов */
+.plan-page,
+.plan-page * {
+  cursor: default !important;
+}
+
+.plan-page a,
+.plan-page button,
+.plan-page [role="button"],
+.plan-page input[type="submit"],
+.plan-page input[type="button"],
+.plan-page select,
+.plan-page label[for] {
+  cursor: pointer !important;
+}
+
+/* Обычный курсор на тактической доске */
+.tactical-board-page,
+.tactical-board-page * {
+  cursor: default !important;
+}
+
+/* Обычный курсор в личном кабинете для интерактивных полей */
+.cabinet input:not([type="submit"]):not([type="button"]),
+.cabinet textarea,
+.cabinet select {
+  cursor: text !important;
+}
+
+.cabinet input[type="date"],
+.cabinet select {
+  cursor: pointer !important;
+}
+
+.tactical-board-page a,
+.tactical-board-page button,
+.tactical-board-page [role="button"],
+.tactical-board-page input[type="submit"],
+.tactical-board-page input[type="button"],
+.tactical-board-page select,
+.tactical-board-page label[for] {
+  cursor: pointer !important;
+}
+
+:root {
+  --bg: #0f172a;
+  --bg-card: #1e293b;
+  --accent: #0ea5e9;
+  --accent-hover: #0284c7;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border: #334155;
+  --ice: #e0f2fe;
+  /* Ice theme (hockey rink) */
+  --ice-bg: #e0f4fe;
+  --ice-bg-dark: #bae6fd;
+  --ice-accent: #0284c7;
+  --ice-accent-light: #38bdf8;
+  --ice-text: #0c4a6e;
+  --ice-text-muted: #0369a1;
+}
+
+body {
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font-family: inherit;
+}
+
+input, textarea {
+  font-family: inherit;
+}

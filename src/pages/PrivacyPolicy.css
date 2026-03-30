@@ -1,0 +1,87 @@
+.privacy-policy-page {
+  align-items: flex-start;
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+.privacy-policy-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 720px;
+  color: var(--text);
+}
+
+.privacy-policy-back {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.privacy-policy-back:hover {
+  text-decoration: underline;
+}
+
+.privacy-policy-card h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.privacy-policy-meta {
+  color: var(--text-muted);
+  margin-bottom: 1.5rem;
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.privacy-policy-card section {
+  margin-bottom: 1.35rem;
+}
+
+.privacy-policy-card h2 {
+  font-size: 1.05rem;
+  margin-bottom: 0.6rem;
+  color: var(--text);
+}
+
+.privacy-policy-card p {
+  line-height: 1.55;
+  font-size: 0.95rem;
+  margin: 0 0 0.65rem;
+}
+
+.privacy-policy-card p:last-child {
+  margin-bottom: 0;
+}
+
+.privacy-policy-card section p + p {
+  margin-top: 0.5rem;
+}
+
+.privacy-policy-card ul {
+  margin: 0.35rem 0 0.65rem;
+  padding-left: 1.35rem;
+  line-height: 1.55;
+  font-size: 0.95rem;
+}
+
+.privacy-policy-card li {
+  margin-bottom: 0.35rem;
+}
+
+.privacy-policy-card li:last-child {
+  margin-bottom: 0;
+}
+
+.privacy-policy-card a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.privacy-policy-card a:hover {
+  color: var(--accent-hover);
+}
