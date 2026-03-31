@@ -27,7 +27,7 @@ export default function PlanCreate() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [limitModal, setLimitModal] = useState({ open: false, message: '' })
-  const limits = getTariffLimits(profile.tariff)
+  const limits = getTariffLimits(profile.effectiveTariff ?? profile.tariff)
   const maxExercises = limits.maxExercisesPerPlan >= 0 ? limits.maxExercisesPerPlan : Infinity
 
   useEffect(() => {

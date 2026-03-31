@@ -30,7 +30,7 @@ export default function PaymentCheckout() {
           'Content-Type': 'application/json',
           Authorization: getToken()
         },
-        body: JSON.stringify({ period })
+        body: JSON.stringify({ period, tariffId })
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Не удалось создать платёж')

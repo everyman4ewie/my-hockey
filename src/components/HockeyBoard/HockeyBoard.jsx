@@ -1,7 +1,8 @@
 import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react'
-import { Undo2, Redo2, ClipboardPaste, Trash2, Download, ChevronDown, ChevronUp } from 'lucide-react'
+import { Undo2, Redo2, ClipboardPaste, Trash2, Download, ChevronDown, ChevronUp, Pencil } from 'lucide-react'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { toolIcons } from './ToolIcons'
+import { newEntityId } from '../../utils/boardEntityId'
 import './HockeyBoard.css'
 
 const RINK_IMG = '/assets/hockey-rink.png'
@@ -36,12 +37,47 @@ const TOOLS = [
   { id: 'goalkeeper', label: 'Голкипер' },
   { id: 'numbers', label: 'Цифры' },
   { id: 'puck', label: 'Шайба' },
+  { id: 'puckCluster', label: 'Мелкие шайбы' },
   { id: 'goal', label: 'Ворота' },
   { id: 'cone', label: 'Конус' },
   { id: 'barrier', label: 'Барьер' }
 ]
 
 const ICON_TYPES_WITH_INDEX = ['player', 'playerTriangle', 'forward', 'defender']
+
+/** Двойной клик по объекту при другом инструменте: переключить на «Выбор» и выделить объект (одиночный клик в «Выбор» — как раньше). */
+const SWITCH_TO_SELECT_DOUBLE_CLICK_MS = 800
+/** Второй клик считается «тем же местом», что и первый (индекс после 1-го клика может смениться из‑за нового штриха/иконки). */
+const SWITCH_TO_SELECT_PROXIMITY_PX = 28
+/** Задержка перед появлением объекта — время на проверку двойного клика (переключение в «Выбор»). */
+const PLACEMENT_DOUBLE_CLICK_DELAY_MS = 280
+/** Если за это время курсор сдвинулся (рисование линии/карандаша), отменяем ожидание и фиксируем штрих сразу. */
+const PLACEMENT_DEFER_MOVE_FLUSH_PX = 10
+
+/** Карандаш/кривая/боковое: без задержки по пустому полю; с задержкой при клике по уже существующему объекту. Остальные инструменты из списка — всегда с задержкой для проверки двойного клика. */
+function shouldDeferPlacement(tool, hitKey) {
+  if (tool === 'pen' || tool === 'curve' || tool === 'lateral') return !!hitKey
+  return (
+    tool === 'numbers' ||
+    tool === 'forward' ||
+    tool === 'defender' ||
+    tool === 'player' ||
+    tool === 'playerTriangle' ||
+    tool === 'coach' ||
+    tool === 'goalkeeper' ||
+    tool === 'puck' ||
+    tool === 'puckCluster' ||
+    tool === 'goal' ||
+    tool === 'cone' ||
+    tool === 'barrier' ||
+    ['line', 'arrow', 'pass', 'shot', 'rect', 'circle'].includes(tool)
+  )
+}
+
+function isDeferredDrawingTool(tool) {
+  return tool === 'pen' || tool === 'curve' || tool === 'lateral' ||
+    ['line', 'arrow', 'pass', 'shot', 'rect', 'circle'].includes(tool)
+}
 
 function iconIndexLabel(ic) {
   if (!ic || !ICON_TYPES_WITH_INDEX.includes(ic.type)) return null
@@ -196,6 +232,17 @@ function pathIntersectsRect(p, x1, y1, x2, y2) {
 }
 
 function iconIntersectsRect(ic, x1, y1, x2, y2) {
+  if (ic.type === 'puckCluster') {
+    const minX = Math.min(x1, x2)
+    const maxX = Math.max(x1, x2)
+    const minY = Math.min(y1, y2)
+    const maxY = Math.max(y1, y2)
+    if (PUCK_CLUSTER_OFFSETS.some(o => {
+      const px = ic.x + o.x
+      const py = ic.y + o.y
+      return px >= minX && px <= maxX && py >= minY && py <= maxY
+    })) return true
+  }
   if (ic.type === 'goal') {
     // Центр в расширенном rect ИЛИ любая вершина rect попадает в тело ворот (полукруг)
     const corners = [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 }]
@@ -219,10 +266,35 @@ function hitTestGoalIcon(ic, px, py) {
 }
 
 const PUCK_ICON_R = 6
+/** Мелкие шайбы: ромб из четырёх точек, повёрнутый на 30° (по часовой), шаг от центра чуть больше прежнего. */
+const PUCK_CLUSTER_DOT_R = 1.5
+const PUCK_CLUSTER_SPREAD = 4.5
+const PUCK_CLUSTER_ROT_RAD = (30 * Math.PI) / 180
+const PUCK_CLUSTER_OFFSETS = (() => {
+  const c = Math.cos(PUCK_CLUSTER_ROT_RAD)
+  const s = Math.sin(PUCK_CLUSTER_ROT_RAD)
+  const sp = PUCK_CLUSTER_SPREAD
+  const base = [
+    { x: 0, y: -sp },
+    { x: -sp, y: 0 },
+    { x: sp, y: 0 },
+    { x: 0, y: sp }
+  ]
+  return base.map(({ x, y }) => ({
+    x: x * c + y * s,
+    y: -x * s + y * c
+  }))
+})()
 
 function hitTestIcon(ic, coords) {
   if (ic.type === 'goal') return hitTestGoalIcon(ic, coords.x, coords.y)
   if (ic.type === 'puck') return Math.hypot(coords.x - ic.x, coords.y - ic.y) < PUCK_ICON_R + 3
+  if (ic.type === 'puckCluster') {
+    for (const o of PUCK_CLUSTER_OFFSETS) {
+      if (Math.hypot(coords.x - (ic.x + o.x), coords.y - (ic.y + o.y)) < PUCK_CLUSTER_DOT_R + 3) return true
+    }
+    return Math.hypot(coords.x - ic.x, coords.y - ic.y) < PUCK_CLUSTER_SPREAD + PUCK_CLUSTER_DOT_R + 3
+  }
   if (ic.type === 'cone' || ic.type === 'barrier') return Math.hypot(coords.x - ic.x, coords.y - ic.y) < 16
   if (ic.type === 'numberMark') {
     const pad = (ic.num?.length || 1) > 1 ? 18 : 12
@@ -283,11 +355,14 @@ export default function HockeyBoard({
   canDownloadPng = true,
   onDownloadPng,
   customBackgrounds = {},
-  fitCanvasToContainer = false
+  fitCanvasToContainer = false,
+  /** На узких экранах не сворачивать панель в одну строку «Инструменты» (страница видео и т.п.). */
+  alwaysShowFullMobileToolbar = false
 }) {
   const canvasRef = useRef(null)
   const boardCanvasWrapRef = useRef(null)
   const boardToolbarRef = useRef(null)
+  const pencilMenuWrapRef = useRef(null)
   /** Под фиксированную панель (тактическая доска, десктоп): резервируем реальную высоту, в т.ч. при переносе в 2+ ряда */
   const [fixedToolbarSpacerPx, setFixedToolbarSpacerPx] = useState(120)
   const [fitSlotPx, setFitSlotPx] = useState({ w: 0, h: 0 })
@@ -308,14 +383,35 @@ export default function HockeyBoard({
   const [waveDirection, setWaveDirection] = useState(false)
   const [waveMenuOpen, setWaveMenuOpen] = useState(false)
   const [numberMenuOpen, setNumberMenuOpen] = useState(false)
+  const [pencilMenuOpen, setPencilMenuOpen] = useState(false)
   const [numberDigit, setNumberDigit] = useState(1)
   const [autoIndexByIconType, setAutoIndexByIconType] = useState(() => ({ ...DEFAULT_AUTO_INDEX_BY_ICON_TYPE }))
   const [penArrowEnd, setPenArrowEnd] = useState(false)
   const isMobileToolbar = useMediaQuery('(max-width: 768px)')
+  const useMobileVideoToolbar = alwaysShowFullMobileToolbar && isMobileToolbar
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
   useEffect(() => {
     if (!isMobileToolbar) setMobileToolsOpen(false)
   }, [isMobileToolbar])
+
+  useEffect(() => {
+    if (!isMobileToolbar) setPencilMenuOpen(false)
+  }, [isMobileToolbar])
+
+  useEffect(() => {
+    if (!pencilMenuOpen) return
+    const close = (e) => {
+      if (!pencilMenuWrapRef.current?.contains(e.target)) setPencilMenuOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', close)
+    }
+  }, [pencilMenuOpen])
+
+  const showMobileCollapsedToolbar =
+    isMobileToolbar && !alwaysShowFullMobileToolbar && !mobileToolsOpen
 
   useLayoutEffect(() => {
     if (!fitCanvasToContainer || readOnly || isMobileToolbar) {
@@ -366,6 +462,13 @@ export default function HockeyBoard({
   const redoRef = useRef([])
   const hasPushedForDragRef = useRef(false)
   const selectMouseDownRef = useRef(null)
+  const pendingSelectRef = useRef(null)
+  const pathsRef = useRef(paths)
+  const iconsRef = useRef(icons)
+  const deferredPlacementTimerRef = useRef(null)
+  const deferredPlacementPayloadRef = useRef(null)
+  pathsRef.current = paths
+  iconsRef.current = icons
   const DRAG_THRESHOLD = 5
   const clipboardRef = useRef(null)
   const [undoable, setUndoable] = useState(false)
@@ -425,19 +528,20 @@ export default function HockeyBoard({
     clipboardRef.current.forEach(item => {
       if (item.type === 'path') {
         const p = item.data
+        const nid = newEntityId()
         if (p.type === 'path' && p.points) {
-          newPaths.push({ ...p, points: p.points.map(pt => ({ ...pt, x: pt.x + offset, y: pt.y + offset })) })
+          newPaths.push({ ...p, id: nid, points: p.points.map(pt => ({ ...pt, x: pt.x + offset, y: pt.y + offset })) })
         } else if (p.type === 'line' || p.type === 'arrow' || p.type === 'dashedArrow' || p.type === 'doubleArrow') {
-          newPaths.push({ ...p, x1: p.x1 + offset, y1: p.y1 + offset, x2: p.x2 + offset, y2: p.y2 + offset })
+          newPaths.push({ ...p, id: nid, x1: p.x1 + offset, y1: p.y1 + offset, x2: p.x2 + offset, y2: p.y2 + offset })
         } else if (p.type === 'rect') {
-          newPaths.push({ ...p, x: p.x + offset, y: p.y + offset })
+          newPaths.push({ ...p, id: nid, x: p.x + offset, y: p.y + offset })
         } else if (p.type === 'circle') {
-          newPaths.push({ ...p, x1: p.x1 + offset, y1: p.y1 + offset, x2: p.x2 + offset, y2: p.y2 + offset })
+          newPaths.push({ ...p, id: nid, x1: p.x1 + offset, y1: p.y1 + offset, x2: p.x2 + offset, y2: p.y2 + offset })
         } else {
-          newPaths.push(p)
+          newPaths.push({ ...p, id: nid })
         }
       } else if (item.type === 'icon') {
-        newIcons.push({ ...item.data, x: item.data.x + offset, y: item.data.y + offset })
+        newIcons.push({ ...item.data, id: newEntityId(), x: item.data.x + offset, y: item.data.y + offset })
       }
     })
     onChange?.({ paths: newPaths, icons: newIcons })
@@ -459,6 +563,94 @@ export default function HockeyBoard({
   const notifyChange = useCallback((newPaths, newIcons) => {
     onChange?.({ paths: newPaths ?? paths, icons: newIcons ?? icons })
   }, [onChange, paths, icons])
+
+  const discardDeferredPlacement = useCallback(() => {
+    if (deferredPlacementTimerRef.current) {
+      clearTimeout(deferredPlacementTimerRef.current)
+      deferredPlacementTimerRef.current = null
+    }
+    deferredPlacementPayloadRef.current = null
+  }, [])
+
+  const runDeferredPlacementFromPayload = useCallback((payload) => {
+    if (!payload) return
+    const { tool: placementTool, coords: c, snapshot } = payload
+    const pathsNow = pathsRef.current
+    const iconsNow = iconsRef.current
+    const col = snapshot.color
+    const sw = snapshot.strokeWidth
+    const ws = snapshot.waveStyle
+    const wd = snapshot.waveDirection
+    const pae = snapshot.penArrowEnd
+    const nd = snapshot.numberDigit
+    const autoIdx = snapshot.autoIndexByIconType
+
+    if (placementTool === 'numbers') {
+      pushUndo()
+      notifyChange(pathsNow, [...iconsNow, {
+        id: newEntityId(),
+        type: 'numberMark',
+        num: String(nd),
+        x: c.x,
+        y: c.y,
+        color: col
+      }])
+      return
+    }
+    if (placementTool === 'forward' || placementTool === 'defender') {
+      pushUndo()
+      const useAutoIndex = autoIdx[placementTool] !== false
+      const nextNum = useAutoIndex ? nextSequentialIndexForIconType(iconsNow, placementTool) : ''
+      notifyChange(pathsNow, [...iconsNow, { id: newEntityId(), type: placementTool, x: c.x, y: c.y, color: col, num: nextNum }])
+      return
+    }
+    if (placementTool === 'player' || placementTool === 'playerTriangle' || placementTool === 'coach' || placementTool === 'goalkeeper' || placementTool === 'puck' || placementTool === 'puckCluster' || placementTool === 'goal' || placementTool === 'cone' || placementTool === 'barrier') {
+      pushUndo()
+      const playerTypes = ['player', 'playerTriangle']
+      const nextNum = playerTypes.includes(placementTool)
+        ? (autoIdx[placementTool] !== false ? nextSequentialIndexForIconType(iconsNow, placementTool) : '')
+        : undefined
+      const iconColor = (placementTool === 'cone' || placementTool === 'barrier') ? (col || '#dc2626') : col
+      const newIcon = {
+        id: newEntityId(),
+        type: placementTool,
+        x: c.x,
+        y: c.y,
+        color: iconColor,
+        num: nextNum,
+        ...(placementTool === 'goal' && { angle: 0 })
+      }
+      notifyChange(pathsNow, [...iconsNow, newIcon])
+      return
+    }
+
+    setStart(c)
+    setIsDrawing(true)
+    if (placementTool === 'pen' || placementTool === 'curve' || placementTool === 'lateral') {
+      pushUndo()
+      const newPath = {
+        id: newEntityId(),
+        type: 'path',
+        points: [{ x: c.x, y: c.y }],
+        color: col,
+        width: sw,
+        wavy: placementTool === 'curve' || placementTool === 'lateral',
+        waveStyle: placementTool === 'curve' ? ws : placementTool === 'lateral' ? 'lateral' : 'single',
+        waveDirection: placementTool === 'curve' ? wd : false,
+        arrowEnd: placementTool === 'pen' ? pae : false
+      }
+      notifyChange([...pathsNow, newPath], iconsNow)
+    } else if (['line', 'arrow', 'pass', 'shot', 'rect', 'circle'].includes(placementTool)) {
+      pushUndo()
+      const pathType = placementTool === 'pass' ? 'dashedArrow' : placementTool === 'shot' ? 'doubleArrow' : placementTool
+      const initial = placementTool === 'line' || placementTool === 'arrow' || placementTool === 'pass' || placementTool === 'shot'
+        ? { id: newEntityId(), type: pathType, x1: c.x, y1: c.y, x2: c.x, y2: c.y, color: col, width: sw }
+        : placementTool === 'rect'
+          ? { id: newEntityId(), type: 'rect', x: c.x, y: c.y, w: 0, h: 0, color: col, width: sw }
+          : { id: newEntityId(), type: 'circle', x1: c.x, y1: c.y, x2: c.x, y2: c.y, color: col, width: sw }
+      notifyChange([...pathsNow, initial], iconsNow)
+    }
+  }, [pushUndo, notifyChange, setStart, setIsDrawing])
 
   const fullSrc = (customBackgrounds.full || '').trim() || RINK_IMG
   const halfAttackSrc = (customBackgrounds.halfAttack || '').trim() || RINK_HALF_ATTACK_IMG
@@ -572,6 +764,10 @@ export default function HockeyBoard({
       }
 
       paths.forEach((p, pIdx) => {
+        const pathAlpha = p.opacity != null ? p.opacity : 1
+        if (pathAlpha < 0.001) return
+        ctx.save()
+        ctx.globalAlpha = pathAlpha
         ctx.strokeStyle = selectedPaths.includes(pIdx) ? '#9333ea' : (p.color || '#000')
         ctx.lineWidth = selectedPaths.includes(pIdx) ? (p.width || 2) + 1 : (p.width || 2)
         if (p.type === 'path') {
@@ -758,6 +954,7 @@ export default function HockeyBoard({
           ctx.arc(p.x1, p.y1, r, 0, Math.PI * 2)
           ctx.stroke()
         }
+        ctx.restore()
       })
 
       const drawEndpointMarkers = (pathIdx) => {
@@ -795,6 +992,10 @@ export default function HockeyBoard({
       }
 
       icons.forEach((ic, idx) => {
+        const iconAlpha = ic.opacity != null ? ic.opacity : 1
+        if (iconAlpha < 0.001) return
+        ctx.save()
+        ctx.globalAlpha = iconAlpha
         const size = 22
         const iconColor = ic.color || '#dc2626'
         ctx.strokeStyle = selectedIcons.includes(idx) ? '#9333ea' : iconColor
@@ -906,6 +1107,16 @@ export default function HockeyBoard({
           ctx.arc(ic.x, ic.y, PUCK_ICON_R, 0, Math.PI * 2)
           ctx.fill()
           ctx.stroke()
+        } else if (ic.type === 'puckCluster') {
+          ctx.fillStyle = iconColor
+          ctx.strokeStyle = iconColor
+          ctx.lineWidth = 1
+          for (const o of PUCK_CLUSTER_OFFSETS) {
+            ctx.beginPath()
+            ctx.arc(ic.x + o.x, ic.y + o.y, PUCK_CLUSTER_DOT_R, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
         } else if (ic.type === 'cone') {
           const w = 10, h = 14
           ctx.beginPath()
@@ -950,6 +1161,7 @@ export default function HockeyBoard({
             ctx.stroke()
           }
         }
+        ctx.restore()
       })
 
       if (teamLogo && teamLogoImgRef.current?.complete && teamLogoImgRef.current.naturalWidth) {
@@ -1049,6 +1261,126 @@ export default function HockeyBoard({
       }
     }
 
+    const hitKey = hitIcon >= 0 ? `i:${hitIcon}` : hitIdx >= 0 ? `p:${hitIdx}` : null
+
+    /* Другой инструмент: двойной клик по объекту → «Выбор» + выделение. Храним id и координаты 1-го клика: после 1-го клика в массиве может появиться новый путь/иконка, индекс hit меняется. */
+    if (tool !== 'select' && tool !== 'eraser' && hitKey) {
+      const pr = pendingSelectRef.current
+      const now = Date.now()
+      const detailCount = typeof e.detail === 'number' ? e.detail : 0
+      const distToPrev = pr ? Math.hypot(coords.x - pr.x, coords.y - pr.y) : Infinity
+      const closeInTimeAndSpace =
+        pr &&
+        (now - pr.t) < SWITCH_TO_SELECT_DOUBLE_CLICK_MS &&
+        distToPrev < SWITCH_TO_SELECT_PROXIMITY_PX &&
+        (pr.iconId != null || pr.pathId != null)
+      const isDouble =
+        (e.pointerType === 'mouse' && detailCount >= 2 && (hitKey || (pr && (pr.iconId != null || pr.pathId != null)))) ||
+        closeInTimeAndSpace
+
+      const resolveTargetFromPending = () => {
+        if (!pr) return { iconIdx: -1, pathIdx: -1 }
+        if (pr.iconId != null) {
+          const i = icons.findIndex(ic => ic.id === pr.iconId)
+          if (i >= 0) return { iconIdx: i, pathIdx: -1 }
+        }
+        if (pr.pathId != null) {
+          const i = paths.findIndex(p => p.id === pr.pathId)
+          if (i >= 0) return { iconIdx: -1, pathIdx: i }
+        }
+        return { iconIdx: -1, pathIdx: -1 }
+      }
+
+      if (isDouble) {
+        pendingSelectRef.current = null
+        let iconIdx = hitIcon
+        let pathIdx = hitIdx
+        const fromPending = resolveTargetFromPending()
+        if (fromPending.iconIdx >= 0 || fromPending.pathIdx >= 0) {
+          iconIdx = fromPending.iconIdx
+          pathIdx = fromPending.pathIdx
+        }
+        if (iconIdx >= 0 || pathIdx >= 0) {
+          setTool('select')
+          if (iconIdx >= 0) {
+            discardDeferredPlacement()
+            if (e.shiftKey) {
+              setSelectedIcons(prev => prev.includes(iconIdx) ? prev.filter(i => i !== iconIdx) : [...prev, iconIdx])
+            } else {
+              setSelectedIcons([iconIdx])
+              setSelectedPaths([])
+            }
+            setDragOffset({ x: coords.x - icons[iconIdx].x, y: coords.y - icons[iconIdx].y })
+            selectMouseDownRef.current = coords
+            hasPushedForDragRef.current = false
+            return
+          }
+          if (pathIdx >= 0) {
+            discardDeferredPlacement()
+            if (e.shiftKey) {
+              setSelectedPaths(prev => prev.includes(pathIdx) ? prev.filter(i => i !== pathIdx) : [...prev, pathIdx])
+            } else {
+              setSelectedPaths([pathIdx])
+              setSelectedIcons([])
+            }
+            setDragStart(coords)
+            selectMouseDownRef.current = coords
+            hasPushedForDragRef.current = false
+            return
+          }
+        }
+      }
+
+      const iconId = hitIcon >= 0 ? icons[hitIcon]?.id : null
+      const pathId = hitIcon >= 0 || hitIdx < 0 ? null : paths[hitIdx]?.id
+      pendingSelectRef.current = {
+        x: coords.x,
+        y: coords.y,
+        t: now,
+        iconId: iconId ?? null,
+        pathId: pathId ?? null
+      }
+    } else if (tool !== 'select' && tool !== 'eraser') {
+      pendingSelectRef.current = null
+    }
+
+    if (tool !== 'select') {
+      if (deferredPlacementTimerRef.current) {
+        clearTimeout(deferredPlacementTimerRef.current)
+        deferredPlacementTimerRef.current = null
+        const prevPayload = deferredPlacementPayloadRef.current
+        deferredPlacementPayloadRef.current = null
+        if (prevPayload) runDeferredPlacementFromPayload(prevPayload)
+      }
+
+      const snapshot = {
+        color,
+        strokeWidth,
+        waveStyle,
+        waveDirection,
+        penArrowEnd,
+        numberDigit,
+        autoIndexByIconType: { ...autoIndexByIconType }
+      }
+      const placementPayload = { tool, coords: { x: coords.x, y: coords.y }, snapshot }
+
+      if (shouldDeferPlacement(tool, hitKey)) {
+        deferredPlacementPayloadRef.current = placementPayload
+        deferredPlacementTimerRef.current = setTimeout(() => {
+          deferredPlacementTimerRef.current = null
+          const p = deferredPlacementPayloadRef.current
+          deferredPlacementPayloadRef.current = null
+          if (p) runDeferredPlacementFromPayload(p)
+        }, PLACEMENT_DOUBLE_CLICK_DELAY_MS)
+        return
+      }
+
+      runDeferredPlacementFromPayload(placementPayload)
+      return
+    }
+
+    /* Режим «Выбор»: один клик по объекту — выделение и перетаскивание, как раньше. */
+    pendingSelectRef.current = null
     if (hitIcon >= 0) {
       setTool('select')
       if (e.shiftKey) {
@@ -1062,7 +1394,6 @@ export default function HockeyBoard({
       hasPushedForDragRef.current = false
       return
     }
-
     if (hitIdx >= 0) {
       setTool('select')
       if (e.shiftKey) {
@@ -1077,82 +1408,28 @@ export default function HockeyBoard({
       return
     }
 
-    if (tool === 'select') {
-      setSelectedPaths([])
-      setSelectedIcons([])
-      setSelectionBox({ start: coords, current: coords })
-      return
-    }
-
-    if (tool === 'numbers') {
-      pushUndo()
-      notifyChange(paths, [...icons, {
-        type: 'numberMark',
-        num: String(numberDigit),
-        x: coords.x,
-        y: coords.y,
-        color
-      }])
-      return
-    }
-
-    if (tool === 'forward' || tool === 'defender') {
-      pushUndo()
-      const useAutoIndex = autoIndexByIconType[tool] !== false
-      const nextNum = useAutoIndex ? nextSequentialIndexForIconType(icons, tool) : ''
-      notifyChange(paths, [...icons, { type: tool, x: coords.x, y: coords.y, color, num: nextNum }])
-      return
-    }
-
-    if (tool === 'player' || tool === 'playerTriangle' || tool === 'coach' || tool === 'goalkeeper' || tool === 'puck' || tool === 'goal' || tool === 'cone' || tool === 'barrier') {
-      pushUndo()
-      const playerTypes = ['player', 'playerTriangle']
-      const nextNum = playerTypes.includes(tool)
-        ? (autoIndexByIconType[tool] !== false ? nextSequentialIndexForIconType(icons, tool) : '')
-        : undefined
-      const iconColor = (tool === 'cone' || tool === 'barrier') ? (color || '#dc2626') : color
-      const newIcon = {
-        type: tool,
-        x: coords.x,
-        y: coords.y,
-        color: iconColor,
-        num: nextNum,
-        ...(tool === 'goal' && { angle: 0 })
-      }
-      notifyChange(paths, [...icons, newIcon])
-      return
-    }
-
-    setStart(coords)
-    setIsDrawing(true)
-    if (tool === 'pen' || tool === 'curve' || tool === 'lateral') {
-      pushUndo()
-      const newPath = {
-        type: 'path',
-        points: [{ x: coords.x, y: coords.y }],
-        color,
-        width: strokeWidth,
-        wavy: tool === 'curve' || tool === 'lateral',
-        waveStyle: tool === 'curve' ? waveStyle : tool === 'lateral' ? 'lateral' : 'single',
-        waveDirection: tool === 'curve' ? waveDirection : false,
-        arrowEnd: tool === 'pen' ? penArrowEnd : false
-      }
-      notifyChange([...paths, newPath], icons)
-    } else if (['line', 'arrow', 'pass', 'shot', 'rect', 'circle'].includes(tool)) {
-      pushUndo()
-      const pathType = tool === 'pass' ? 'dashedArrow' : tool === 'shot' ? 'doubleArrow' : tool
-      const initial = tool === 'line' || tool === 'arrow' || tool === 'pass' || tool === 'shot'
-        ? { type: pathType, x1: coords.x, y1: coords.y, x2: coords.x, y2: coords.y, color, width: strokeWidth }
-        : tool === 'rect'
-          ? { type: 'rect', x: coords.x, y: coords.y, w: 0, h: 0, color, width: strokeWidth }
-          : { type: 'circle', x1: coords.x, y1: coords.y, x2: coords.x, y2: coords.y, color, width: strokeWidth }
-      notifyChange([...paths, initial], icons)
-    }
+    setSelectedPaths([])
+    setSelectedIcons([])
+    setSelectionBox({ start: coords, current: coords })
   }
 
   const handleMouseMove = (e) => {
     if (isDrawing || selectedIcons.length > 0 || selectedPaths.length > 0 || extendingEndpoint || selectionBox || rotatingGoalIdx !== null) e.preventDefault()
     const coords = getCanvasCoords(e)
+
+    if (deferredPlacementTimerRef.current && deferredPlacementPayloadRef.current && isPrimaryHeld(e)) {
+      const p = deferredPlacementPayloadRef.current
+      if (isDeferredDrawingTool(p.tool)) {
+        const d = Math.hypot(coords.x - p.coords.x, coords.y - p.coords.y)
+        if (d > PLACEMENT_DEFER_MOVE_FLUSH_PX) {
+          clearTimeout(deferredPlacementTimerRef.current)
+          deferredPlacementTimerRef.current = null
+          const prev = deferredPlacementPayloadRef.current
+          deferredPlacementPayloadRef.current = null
+          runDeferredPlacementFromPayload(prev)
+        }
+      }
+    }
 
     if (rotatingGoalIdx !== null && isPrimaryHeld(e)) {
       const ic = icons[rotatingGoalIdx]
@@ -1262,11 +1539,12 @@ export default function HockeyBoard({
       }
     } else if (['line', 'arrow', 'pass', 'shot', 'rect', 'circle'].includes(tool)) {
       const pathType = tool === 'pass' ? 'dashedArrow' : tool === 'shot' ? 'doubleArrow' : tool
+      const last = paths[paths.length - 1]
       const newPath = tool === 'line' || tool === 'arrow' || tool === 'pass' || tool === 'shot'
-        ? { type: pathType, x1: start.x, y1: start.y, x2: coords.x, y2: coords.y, color, width: strokeWidth }
+        ? { ...last, type: pathType, x1: start.x, y1: start.y, x2: coords.x, y2: coords.y, color, width: strokeWidth }
         : tool === 'rect'
-          ? { type: 'rect', x: Math.min(start.x, coords.x), y: Math.min(start.y, coords.y), w: Math.abs(coords.x - start.x), h: Math.abs(coords.y - start.y), color, width: strokeWidth }
-          : { type: 'circle', x1: start.x, y1: start.y, x2: coords.x, y2: coords.y, color, width: strokeWidth }
+          ? { ...last, type: 'rect', x: Math.min(start.x, coords.x), y: Math.min(start.y, coords.y), w: Math.abs(coords.x - start.x), h: Math.abs(coords.y - start.y), color, width: strokeWidth }
+          : { ...last, type: 'circle', x1: start.x, y1: start.y, x2: coords.x, y2: coords.y, color, width: strokeWidth }
       notifyChange([...paths.slice(0, -1), newPath], icons)
     } else if (tool === 'eraser') {
       const hitIcon = icons.findIndex(ic => hitTestIcon(ic, coords) || Math.hypot(coords.x - ic.x, coords.y - ic.y) < 18)
@@ -1409,11 +1687,20 @@ export default function HockeyBoard({
   }
 
   useEffect(() => {
-    setSelectedIcons([])
-    setSelectedPaths([])
-    setSelectionBox(null)
-    setExtendingEndpoint(null)
-  }, [tool])
+    pendingSelectRef.current = null
+    discardDeferredPlacement()
+    /* При переходе на «Выбор» не сбрасывать выделение: иначе двойной клик по объекту с другого инструмента
+       вызывает setTool('select') + setSelected* в одном обработчике, а этот эффект срабатывает после и
+       обнуляет только что выставленное выделение. */
+    if (tool !== 'select') {
+      setSelectedIcons([])
+      setSelectedPaths([])
+      setSelectionBox(null)
+      setExtendingEndpoint(null)
+    }
+  }, [tool, discardDeferredPlacement])
+
+  useEffect(() => () => discardDeferredPlacement(), [discardDeferredPlacement])
 
   useEffect(() => {
     if (!waveMenuOpen) return
@@ -1469,46 +1756,53 @@ export default function HockeyBoard({
 
   return (
     <div
-      className={`hockey-board${isMobileToolbar && !mobileToolsOpen ? ' hockey-board--mobile-collapsed' : ''}`}
+      className={`hockey-board${showMobileCollapsedToolbar ? ' hockey-board--mobile-collapsed' : ''}${useMobileVideoToolbar ? ' hockey-board--mobile-video-toolbar' : ''}`}
       style={boardRootStyle}
     >
       {!readOnly && (
         <>
-          {isMobileToolbar && !mobileToolsOpen && (
+          {showMobileCollapsedToolbar && (
             <div ref={boardToolbarRef} className="board-toolbar board-toolbar-mobile-summary">
-              <button
-                type="button"
-                className="board-toolbar-mobile-expand"
-                onClick={() => setMobileToolsOpen(true)}
-              >
-                <span>Инструменты</span>
-                <ChevronDown size={20} strokeWidth={2} aria-hidden />
-              </button>
-              <div className="toolbar-section actions toolbar-actions-icons-only">
-                <button type="button" className="btn-outline btn-icon-only" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">
-                  <Undo2 size={18} strokeWidth={2} />
+              <div className="board-toolbar-mobile-summary-row">
+                <button
+                  type="button"
+                  className="board-toolbar-mobile-expand"
+                  onClick={() => setMobileToolsOpen(true)}
+                >
+                  <span>Инструменты</span>
+                  <ChevronDown size={20} strokeWidth={2} aria-hidden />
                 </button>
-                <button type="button" className="btn-outline btn-icon-only" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">
-                  <Redo2 size={18} strokeWidth={2} />
-                </button>
-                <button type="button" className="btn-outline btn-icon-only" onClick={pasteClipboard} title="Вставить (Ctrl+V)">
-                  <ClipboardPaste size={18} strokeWidth={2} />
-                </button>
-                <button type="button" className="btn-outline btn-icon-only" onClick={clearCanvas} title="Очистить">
-                  <Trash2 size={18} strokeWidth={2} />
-                </button>
-                {canDownloadPng && (
-                  <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title="Скачать PNG">
-                    <Download size={18} strokeWidth={2} />
+                <div className="toolbar-section actions toolbar-actions-icons-only">
+                  <button type="button" className="btn-outline btn-icon-only" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">
+                    <Undo2 size={18} strokeWidth={2} />
                   </button>
-                )}
+                  <button type="button" className="btn-outline btn-icon-only" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">
+                    <Redo2 size={18} strokeWidth={2} />
+                  </button>
+                  <button type="button" className="btn-outline btn-icon-only" onClick={pasteClipboard} title="Вставить (Ctrl+V)">
+                    <ClipboardPaste size={18} strokeWidth={2} />
+                  </button>
+                  <button type="button" className="btn-outline btn-icon-only" onClick={clearCanvas} title="Очистить">
+                    <Trash2 size={18} strokeWidth={2} />
+                  </button>
+                  {canDownloadPng && (
+                    <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title="Скачать PNG">
+                      <Download size={18} strokeWidth={2} />
+                    </button>
+                  )}
+                </div>
+                {toolbarRight && <div className="toolbar-right toolbar-right-mobile-summary">{toolbarRight}</div>}
               </div>
-              {toolbarRight && <div className="toolbar-right toolbar-right-mobile-summary">{toolbarRight}</div>}
             </div>
           )}
-          {(!isMobileToolbar || mobileToolsOpen) && (
+          {(!isMobileToolbar || mobileToolsOpen || alwaysShowFullMobileToolbar) && (
         <div ref={boardToolbarRef} className="board-toolbar">
-          {isMobileToolbar && (
+          {!isMobileToolbar && (
+            <p className="board-toolbar-hint board-toolbar-hint--top">
+              Для выбора и перемещения кликните по объекту 2 раза.
+            </p>
+          )}
+          {isMobileToolbar && !alwaysShowFullMobileToolbar && (
             <button type="button" className="board-toolbar-mobile-collapse" onClick={() => setMobileToolsOpen(false)}>
               <span>Свернуть панель</span>
               <ChevronUp size={18} strokeWidth={2} aria-hidden />
@@ -1586,18 +1880,112 @@ export default function HockeyBoard({
               })}
             </div>
           </div>
-          <div className="toolbar-section colors">
-            <span className="toolbar-label">Цвет</span>
-            <div className="color-buttons">
-              {COLORS.map(c => (
-                <button key={c.hex} className={`color-btn ${color === c.hex ? 'active' : ''}`} style={{ background: c.hex }} onClick={() => setColor(c.hex)} title={c.name} />
-              ))}
+          {useMobileVideoToolbar ? (
+            <div className="toolbar-section toolbar-mobile-video-appearance">
+              <div ref={pencilMenuWrapRef} className="toolbar-pencil-menu-wrap">
+                <button
+                  type="button"
+                  className={`toolbar-pencil-menu-trigger${pencilMenuOpen ? ' is-open' : ''}${color === '#ffffff' ? ' toolbar-pencil-menu-trigger--light' : ''}`}
+                  style={{ color: color === '#ffffff' ? '#64748b' : color }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setPencilMenuOpen((v) => !v)
+                  }}
+                  title="Цвет и толщина линии"
+                  aria-expanded={pencilMenuOpen}
+                  aria-haspopup="dialog"
+                >
+                  <Pencil
+                    size={22}
+                    strokeWidth={2.25}
+                    style={{ color: color === '#ffffff' ? '#64748b' : color }}
+                    fill="none"
+                    aria-hidden
+                  />
+                </button>
+                {pencilMenuOpen && (
+                  <div className="toolbar-pencil-menu-dropdown" role="dialog" aria-label="Цвет и толщина">
+                    <span className="toolbar-label">Цвет</span>
+                    <div className="color-buttons">
+                      {COLORS.map((c) => (
+                        <button
+                          key={c.hex}
+                          type="button"
+                          className={`color-btn ${color === c.hex ? 'active' : ''}`}
+                          style={{ background: c.hex }}
+                          onClick={() => setColor(c.hex)}
+                          title={c.name}
+                        />
+                      ))}
+                    </div>
+                    <span className="toolbar-label">Толщина</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max="8"
+                      value={strokeWidth}
+                      onChange={(e) => setStrokeWidth(Number(e.target.value))}
+                      className="stroke-slider toolbar-pencil-stroke-slider"
+                    />
+                  </div>
+                )}
+              </div>
+              {toolbarRight && <div className="toolbar-right toolbar-right-mobile-video-icon">{toolbarRight}</div>}
+              <button
+                type="button"
+                className="btn-outline btn-icon-only toolbar-mobile-video-clear-btn"
+                onClick={clearCanvas}
+                title="Очистить доску"
+                aria-label="Очистить доску"
+              >
+                <Trash2 size={18} strokeWidth={2} />
+              </button>
+              {!readOnly &&
+                selectedIcons.length === 1 &&
+                ICON_TYPES_WITH_INDEX.includes(icons[selectedIcons[0]]?.type) && (
+                  <div
+                    className="player-index-toolbar player-index-toolbar--mobile-video-inline"
+                    role="group"
+                    aria-label="Номер игрока"
+                  >
+                    <button
+                      type="button"
+                      className="btn-outline btn-player-index-clear"
+                      onClick={() => updateSelectedIconIndex('')}
+                      title="Убрать номер со схемы"
+                    >
+                      Убрать
+                    </button>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      className="player-index-input"
+                      maxLength={3}
+                      value={String(icons[selectedIcons[0]].num ?? '').replace(/\D/g, '').slice(0, 3)}
+                      onChange={(e) => updateSelectedIconIndex(e.target.value)}
+                      title="Цифры 0–9, до 3 знаков. Пусто — номер не показывается."
+                      aria-label="Номер на схеме"
+                    />
+                  </div>
+                )}
             </div>
-          </div>
-          <div className="toolbar-section">
-            <span className="toolbar-label">Толщина</span>
-            <input type="range" min="1" max="8" value={strokeWidth} onChange={e => setStrokeWidth(Number(e.target.value))} className="stroke-slider" />
-          </div>
+          ) : (
+            <>
+              <div className="toolbar-section colors">
+                <span className="toolbar-label">Цвет</span>
+                <div className="color-buttons">
+                  {COLORS.map(c => (
+                    <button key={c.hex} type="button" className={`color-btn ${color === c.hex ? 'active' : ''}`} style={{ background: c.hex }} onClick={() => setColor(c.hex)} title={c.name} />
+                  ))}
+                </div>
+              </div>
+              <div className="toolbar-section">
+                <span className="toolbar-label">Толщина</span>
+                <input type="range" min="1" max="8" value={strokeWidth} onChange={e => setStrokeWidth(Number(e.target.value))} className="stroke-slider" />
+              </div>
+            </>
+          )}
           {tool === 'pen' && (
             <div className="toolbar-section">
               <span className="toolbar-label">Карандаш</span>
@@ -1607,63 +1995,72 @@ export default function HockeyBoard({
               </label>
             </div>
           )}
-          {!readOnly && selectedIcons.length === 1 && ICON_TYPES_WITH_INDEX.includes(icons[selectedIcons[0]]?.type) && (
-            <div className="toolbar-section player-index-toolbar">
-              <span className="toolbar-label">Номер</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                autoComplete="off"
-                className="player-index-input"
-                maxLength={3}
-                value={String(icons[selectedIcons[0]].num ?? '').replace(/\D/g, '').slice(0, 3)}
-                onChange={e => updateSelectedIconIndex(e.target.value)}
-                title="Цифры 0–9, до 3 знаков. Пусто — номер не показывается."
-              />
-              <button
-                type="button"
-                className="btn-outline btn-player-index-clear"
-                onClick={() => updateSelectedIconIndex('')}
-                title="Убрать номер со схемы"
-              >
-                Убрать
-              </button>
+          {!readOnly &&
+            selectedIcons.length === 1 &&
+            ICON_TYPES_WITH_INDEX.includes(icons[selectedIcons[0]]?.type) &&
+            !useMobileVideoToolbar && (
+              <div className="toolbar-section player-index-toolbar">
+                <span className="toolbar-label">Номер</span>
+                <button
+                  type="button"
+                  className="btn-outline btn-player-index-clear"
+                  onClick={() => updateSelectedIconIndex('')}
+                  title="Убрать номер со схемы"
+                >
+                  Убрать
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="player-index-input"
+                  maxLength={3}
+                  value={String(icons[selectedIcons[0]].num ?? '').replace(/\D/g, '').slice(0, 3)}
+                  onChange={(e) => updateSelectedIconIndex(e.target.value)}
+                  title="Цифры 0–9, до 3 знаков. Пусто — номер не показывается."
+                />
+              </div>
+            )}
+          {(!useMobileVideoToolbar || canDownloadPng) && (
+            <div className={`toolbar-section actions${actionBtnsMobile ? ' toolbar-actions-icons-only' : ''}`}>
+              {actionBtnsMobile ? (
+                <>
+                  {!useMobileVideoToolbar && (
+                    <>
+                      <button type="button" className="btn-outline btn-icon-only" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">
+                        <Undo2 size={18} strokeWidth={2} />
+                      </button>
+                      <button type="button" className="btn-outline btn-icon-only" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">
+                        <Redo2 size={18} strokeWidth={2} />
+                      </button>
+                      <button type="button" className="btn-outline btn-icon-only" onClick={pasteClipboard} title="Вставить (Ctrl+V)">
+                        <ClipboardPaste size={18} strokeWidth={2} />
+                      </button>
+                      <button type="button" className="btn-outline btn-icon-only" onClick={clearCanvas} title="Очистить">
+                        <Trash2 size={18} strokeWidth={2} />
+                      </button>
+                    </>
+                  )}
+                  {canDownloadPng && (
+                    <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title="Скачать PNG">
+                      <Download size={18} strokeWidth={2} />
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  <button type="button" className="btn-outline" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">↶ Отмена</button>
+                  <button type="button" className="btn-outline" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">↷ Повтор</button>
+                  <button type="button" className="btn-outline" onClick={pasteClipboard} title="Вставить (Ctrl+V)">Вставить</button>
+                  <button type="button" className="btn-outline" onClick={clearCanvas}>Очистить</button>
+                  {canDownloadPng && (
+                    <button type="button" className="btn-outline" onClick={downloadPng} title="Скачать рисунок в PNG">Скачать PNG</button>
+                  )}
+                </>
+              )}
             </div>
           )}
-          <div className={`toolbar-section actions${actionBtnsMobile ? ' toolbar-actions-icons-only' : ''}`}>
-            {actionBtnsMobile ? (
-              <>
-                <button type="button" className="btn-outline btn-icon-only" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">
-                  <Undo2 size={18} strokeWidth={2} />
-                </button>
-                <button type="button" className="btn-outline btn-icon-only" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">
-                  <Redo2 size={18} strokeWidth={2} />
-                </button>
-                <button type="button" className="btn-outline btn-icon-only" onClick={pasteClipboard} title="Вставить (Ctrl+V)">
-                  <ClipboardPaste size={18} strokeWidth={2} />
-                </button>
-                <button type="button" className="btn-outline btn-icon-only" onClick={clearCanvas} title="Очистить">
-                  <Trash2 size={18} strokeWidth={2} />
-                </button>
-                {canDownloadPng && (
-                  <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title="Скачать PNG">
-                    <Download size={18} strokeWidth={2} />
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                <button type="button" className="btn-outline" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">↶ Отмена</button>
-                <button type="button" className="btn-outline" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">↷ Повтор</button>
-                <button type="button" className="btn-outline" onClick={pasteClipboard} title="Вставить (Ctrl+V)">Вставить</button>
-                <button type="button" className="btn-outline" onClick={clearCanvas}>Очистить</button>
-                {canDownloadPng && (
-                  <button type="button" className="btn-outline" onClick={downloadPng} title="Скачать рисунок в PNG">Скачать PNG</button>
-                )}
-              </>
-            )}
-          </div>
-          {toolbarRight && <div className="toolbar-right">{toolbarRight}</div>}
+          {!useMobileVideoToolbar && toolbarRight && <div className="toolbar-right">{toolbarRight}</div>}
         </div>
           )}
         </>

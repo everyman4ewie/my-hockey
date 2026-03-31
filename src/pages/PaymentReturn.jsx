@@ -33,9 +33,13 @@ export default function PaymentReturn() {
           const res = await fetch('/api/user/profile', { headers: { Authorization: getToken() } })
           const data = await res.json().catch(() => ({}))
           if (cancelled) return
-          if (data.tariff === 'pro') {
+          if (data.tariff === 'pro' || data.tariff === 'pro_plus') {
             setStatus('ok')
-            setMessage('Оплата прошла успешно. Тариф Про активирован.')
+            setMessage(
+              data.tariff === 'pro_plus'
+                ? 'Оплата прошла успешно. Тариф Про+ активирован.'
+                : 'Оплата прошла успешно. Тариф Про активирован.'
+            )
             setTimeout(() => navigate('/cabinet?section=tariffs'), 2000)
             return
           }
@@ -69,9 +73,13 @@ export default function PaymentReturn() {
           setMessage(data.error || 'Не удалось проверить платёж')
           return
         }
-        if (data.status === 'succeeded' || data.tariff === 'pro') {
+        if (data.status === 'succeeded' || data.tariff === 'pro' || data.tariff === 'pro_plus') {
           setStatus('ok')
-          setMessage('Оплата прошла успешно. Тариф Про активирован.')
+          setMessage(
+            data.tariff === 'pro_plus'
+              ? 'Оплата прошла успешно. Тариф Про+ активирован.'
+              : 'Оплата прошла успешно. Тариф Про активирован.'
+          )
           setTimeout(() => navigate('/cabinet?section=tariffs'), 2000)
           return
         }

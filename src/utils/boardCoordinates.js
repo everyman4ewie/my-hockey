@@ -3,6 +3,8 @@
  * Позволяют не смещать рисунок при смене размера экрана / масштаба отображения.
  */
 
+import { assignMissingEntityIds } from './boardEntityId'
+
 function minDim(refW, refH) {
   return Math.min(refW, refH)
 }
@@ -144,13 +146,16 @@ export function denormalizeIcons(icons, refW, refH) {
 export function migrateBoardToNormalized(board) {
   const paths = board.paths || []
   const icons = board.icons || []
+  let out
   if (board.coordSpace === 'normalized') {
-    return { paths, icons }
+    out = { paths, icons }
+  } else {
+    const refW = board.canvasWidth || 800
+    const refH = board.canvasHeight || 400
+    out = {
+      paths: normalizePaths(paths, refW, refH),
+      icons: normalizeIcons(icons, refW, refH)
+    }
   }
-  const refW = board.canvasWidth || 800
-  const refH = board.canvasHeight || 400
-  return {
-    paths: normalizePaths(paths, refW, refH),
-    icons: normalizeIcons(icons, refW, refH)
-  }
+  return assignMissingEntityIds(out.paths, out.icons)
 }

@@ -98,6 +98,18 @@ export const PuckIcon = () => (
   </svg>
 )
 
+/** Несколько мелких шайб — как на поле: ромб, поворот 30°, чуть больше шаг, меньше точки */
+export const PuckClusterIcon = () => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+    <g transform="rotate(30 12 12)">
+      <circle cx="12" cy="7.5" r="1.5" fill="currentColor" />
+      <circle cx="7.5" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="16.5" cy="12" r="1.5" fill="currentColor" />
+      <circle cx="12" cy="16.5" r="1.5" fill="currentColor" />
+    </g>
+  </svg>
+)
+
 export const CoachIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24">
     <circle cx="12" cy="12" r="8" fill="currentColor" />
@@ -162,6 +174,7 @@ export const toolIcons = {
   player: PlayerIcon,
   playerTriangle: PlayerTriangleIcon,
   puck: PuckIcon,
+  puckCluster: PuckClusterIcon,
   coach: CoachIcon,
   goalkeeper: GoalkeeperIcon,
   forward: ForwardIcon,

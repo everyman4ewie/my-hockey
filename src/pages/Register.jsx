@@ -1,7 +1,14 @@
 import { useState, useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import './Auth.css'
+
+function safeRedirectPath(raw) {
+  if (!raw || typeof raw !== 'string') return null
+  const t = raw.trim()
+  if (!t.startsWith('/') || t.startsWith('//')) return null
+  return t
+}
 
 export default function Register() {
   const [email, setEmail] = useState('')
@@ -12,6 +19,8 @@ export default function Register() {
   const [loading, setLoading] = useState(false)
   const { login: authLogin } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const afterAuthPath = useMemo(() => safeRedirectPath(searchParams.get('redirect')), [searchParams])
 
   const captcha = useMemo(() => {
     const a = Math.floor(Math.random() * 9) + 1
@@ -45,7 +54,7 @@ export default function Register() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Ошибка регистрации')
       authLogin(data.user, data.token)
-      navigate('/cabinet')
+      navigate(afterAuthPath || '/cabinet')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -112,7 +121,10 @@ export default function Register() {
           </button>
         </form>
         <p className="auth-link">
-          Уже есть аккаунт? <Link to="/login">Войти</Link>
+          Уже есть аккаунт?{' '}
+          <Link to={afterAuthPath ? `/login?redirect=${encodeURIComponent(afterAuthPath)}` : '/login'}>
+            Войти
+          </Link>
         </p>
       </div>
     </div>

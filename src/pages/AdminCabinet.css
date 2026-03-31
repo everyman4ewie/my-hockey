@@ -150,7 +150,8 @@
 }
 
 .admin-users-table-wrap {
-  overflow-x: auto;
+  overflow-x: visible;
+  width: 100%;
   border-radius: 12px;
   border: 1px solid rgba(2, 132, 199, 0.25);
   transition: all 0.3s ease;
@@ -182,6 +183,56 @@
   color: #0c4a6e;
 }
 
+.admin-users-actions-col {
+  min-width: 0;
+  vertical-align: top;
+}
+
+.admin-user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.admin-user-row-blocked td {
+  opacity: 0.85;
+  background: rgba(220, 38, 38, 0.06);
+}
+
+.admin-user-blocked-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(220, 38, 38, 0.15);
+  color: #b91c1c;
+}
+
+.admin-user-active-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: rgba(34, 197, 94, 0.15);
+  color: #15803d;
+}
+
+.admin-tariff-suspended-tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 0.75rem;
+  color: #b45309;
+  font-weight: 500;
+}
+
+.admin-btn-warn {
+  border-color: rgba(220, 38, 38, 0.45);
+  color: #b91c1c;
+}
+
 .admin-users-table tr:hover td {
   background: rgba(2, 132, 199, 0.08);
 }
@@ -196,8 +247,11 @@
   margin-bottom: 1.5rem;
 }
 
-.cabinet-section-full {
-  max-width: 100%;
+/* Полная ширина области контента (перекрывает max-width: 720px у .cabinet-section в Cabinet.css) */
+.admin-cabinet .cabinet-section.cabinet-section-full {
+  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .admin-textarea {
@@ -285,6 +339,36 @@
   font-size: 0.95rem;
 }
 
+.admin-tariff-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-tariff-option {
+  padding: 8px 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #334155;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-tariff-option:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.admin-tariff-option--active {
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.1);
+  color: #0c4a6e;
+  box-shadow: 0 0 0 1px rgba(2, 132, 199, 0.35);
+}
+
 .admin-modal .form-row input[type="date"] {
   width: 100%;
   padding: 10px 12px;
@@ -304,7 +388,328 @@
   font-size: 0.85rem;
 }
 
+/* —— Состояние сайта (аналитика) —— */
+.admin-site-status {
+  max-width: 100%;
+}
+
+.admin-site-status-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-site-status-head h2 {
+  margin: 0 0 0.35rem;
+}
+
+.admin-site-status-sub {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #64748b;
+  max-width: 42rem;
+}
+
+.admin-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 1.5rem;
+}
+
+.admin-kpi-card .admin-stat-value {
+  font-size: 1.5rem;
+}
+
+.admin-analytics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-panel {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(2, 132, 199, 0.2);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+}
+
+.admin-panel h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  color: #0c4a6e;
+}
+
+.admin-panel h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: #0369a1;
+  font-weight: 600;
+}
+
+.admin-panel-tariffs {
+  margin-bottom: 1.5rem;
+}
+
+.admin-metric-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.admin-metric-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(2, 132, 199, 0.1);
+}
+
+.admin-metric-list li:last-child {
+  border-bottom: none;
+}
+
+.admin-metric-list strong {
+  color: #0c4a6e;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-period-sums {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+}
+
+.admin-period-sums p {
+  margin: 0.35rem 0;
+  font-size: 0.9rem;
+  color: #334155;
+}
+
+.admin-tariff-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.admin-tariff-bar-row {
+  display: grid;
+  grid-template-columns: minmax(100px, 140px) 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.admin-tariff-bar-name {
+  color: #334155;
+}
+
+.admin-tariff-bar-track {
+  height: 10px;
+  background: rgba(2, 132, 199, 0.12);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.admin-tariff-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #0284c7, #8b5cf6);
+  border-radius: 6px;
+  min-width: 2px;
+  transition: width 0.3s ease;
+}
+
+.admin-tariff-bar-num {
+  text-align: right;
+  font-weight: 600;
+  color: #0c4a6e;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-chart-activity {
+  margin-bottom: 1.5rem;
+}
+
+.admin-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 20px;
+  font-size: 0.8rem;
+  margin: 0 0 0.75rem;
+  color: #64748b;
+}
+
+.admin-chart-legend span::before {
+  content: '';
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.lg-users::before { background: #0284c7; }
+.lg-plans::before { background: #16a34a; }
+.lg-boards::before { background: #d97706; }
+.lg-videos::before { background: #9333ea; }
+
+.admin-chart-multi {
+  align-items: flex-end;
+  min-height: 140px;
+}
+
+.admin-chart-day-cluster {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.admin-chart-day-bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 120px;
+  width: 100%;
+}
+
+.admin-chart-multi .admin-chart-bar {
+  width: 18%;
+  max-width: 14px;
+  min-height: 4px;
+  border-radius: 4px 4px 0 0;
+  transition: height 0.2s ease;
+}
+
+.admin-bar-users { background: linear-gradient(180deg, #0284c7, #0369a1); }
+.admin-bar-plans { background: linear-gradient(180deg, #22c55e, #15803d); }
+.admin-bar-boards { background: linear-gradient(180deg, #f59e0b, #d97706); }
+.admin-bar-videos { background: linear-gradient(180deg, #a855f7, #7e22ce); }
+
+.admin-table-scroll {
+  overflow-x: auto;
+  max-height: 280px;
+  overflow-y: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(2, 132, 199, 0.15);
+}
+
+.admin-analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.admin-analytics-table th,
+.admin-analytics-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(2, 132, 199, 0.1);
+}
+
+.admin-analytics-table th {
+  position: sticky;
+  top: 0;
+  background: rgba(240, 249, 255, 0.98);
+  color: #0c4a6e;
+  font-weight: 600;
+  z-index: 1;
+}
+
+.admin-top-users-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.admin-mini-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.admin-mini-table th,
+.admin-mini-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid rgba(2, 132, 199, 0.1);
+}
+
+.admin-table-empty {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.admin-recent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.admin-recent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+
+.admin-recent-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(2, 132, 199, 0.1);
+}
+
+.admin-recent-list li:last-child {
+  border-bottom: none;
+}
+
+.admin-recent-login,
+.admin-recent-title {
+  font-weight: 600;
+  color: #0c4a6e;
+  flex: 1 1 120px;
+}
+
+.admin-recent-meta {
+  color: #64748b;
+  font-size: 0.8rem;
+}
+
+.admin-tariff-badge-inline {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+}
+
 @media (max-width: 768px) {
+  .admin-users-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .admin-users-actions-col {
+    min-width: 260px;
+  }
+
+  .admin-site-status {
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+    box-sizing: border-box;
+  }
+
   .admin-dashboard {
     max-width: 100%;
     min-width: 0;
@@ -312,8 +717,13 @@
     box-sizing: border-box;
   }
 
-  .admin-stats-grid {
+  .admin-stats-grid,
+  .admin-kpi-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .admin-site-status-head {
+    flex-direction: column;
   }
 
   .admin-chart-block,

@@ -1,7 +1,20 @@
 import { useState } from 'react'
-import { Target, FileText, Download, Award, Zap, Shield, Image } from 'lucide-react'
-import { IconHockeyStick } from '../Icons/HockeyIcons'
+import { Link } from 'react-router-dom'
+import { Target, FileText, Download, Award, Zap, Shield, Image, Video } from 'lucide-react'
+import { TARIFFS } from '../../constants/tariffs'
+import { LANDING_FEATURES_DEFAULTS } from '../../constants/landingFeaturesDefaults'
+import { mergeEditorFeatures } from '../../utils/mergeLandingFeatures'
 import './PageEditor.css'
+
+const LANDING_TARIFF_IDS = ['free', 'pro', 'pro_plus']
+const LANDING_TARIFFS = LANDING_TARIFF_IDS.map((id) => TARIFFS.find((t) => t.id === id)).filter(Boolean)
+const TARIFFS_REGISTER_HREF = `/register?redirect=${encodeURIComponent('/cabinet?section=tariffs')}`
+
+function formatPreviewTariffPrice(tariff, billingPeriod) {
+  if (tariff.id === 'free') return '0 руб. — НАВСЕГДА'
+  if (billingPeriod === 'year') return `${tariff.priceYear.toLocaleString('ru-RU')} руб./год`
+  return `${tariff.priceMonth.toLocaleString('ru-RU')} руб./мес`
+}
 
 const ICON_OPTIONS = [
   { value: 'target', label: 'Цель', Icon: Target },
@@ -9,7 +22,8 @@ const ICON_OPTIONS = [
   { value: 'download', label: 'Скачать', Icon: Download },
   { value: 'award', label: 'Награда', Icon: Award },
   { value: 'zap', label: 'Молния', Icon: Zap },
-  { value: 'shield', label: 'Щит', Icon: Shield }
+  { value: 'shield', label: 'Щит', Icon: Shield },
+  { value: 'video', label: 'Видео', Icon: Video }
 ]
 
 const defaultPages = {
@@ -19,24 +33,37 @@ const defaultPages = {
   canvasBackgrounds: {},
   canvasSize: { width: 800, height: 400 },
   heroTitle: 'План-конспекты и тактические доски для хоккеистов',
-  heroSubtitle: 'Создавайте схемы тренировок, сохраняйте в PDF и Word. Всё необходимое для профессиональных тренеров.',
-  aboutText: 'Hockey Tactics — платформа для тренеров и хоккеистов. Мы помогаем создавать наглядные план-конспекты тренировок с тактическими схемами на хоккейной площадке. Рисуйте, сохраняйте и делитесь своими разработками.',
-  contactsEmail: 'support@hockey-tactics.ru',
-  contactsNote: 'Мы ответим в течение 24 часов',
+  heroSubtitle: 'Схемы на льду, план-конспекты, тактическое видео со скачиванием MP4 — всё для тренеров и команд.',
+  aboutLead: 'Создание план-конспектов, тактических досок, видео. Всё на одной платформе.',
+  aboutText:
+    'Создавайте схемы тренировок, сохраняйте в PNG. Создавайте план-конспекты и сохраняйте их в Word. Записывайте тактическое видео и выгружайте MP4. Всё необходимое для профессиональных тренеров.',
+  contactsAddress: '150014, г. Ярославль, ул. Володарского, д. 8',
+  contactsPhone: '+7 (4852) 00-00-00',
+  contactsEmail: 'info@my-hockey.ru',
+  contactsNote: '',
+  contactsSocialVkUrl: '',
+  contactsSocialTgUrl: '',
+  contactsSocialMaxUrl: '',
+  contactsSocialVkLabel: 'BK',
+  contactsSocialTgLabel: 'TG',
+  contactsSocialMaxLabel: 'MAX',
+  footerBrandName: 'МОЙ ХОККЕЙ',
+  footerCopyrightBrand: 'MY HOCKEY',
+  footerRightsLine: '© Все права защищены',
+  footerLegalIp: 'ИП Ячменьков И.Д.',
+  footerLegalInn: 'ИНН: 760402772519',
+  footerLegalOgrnip: 'ОГРНИП: 325762700040692',
   footerText: '© Hockey Tactics — платформа для тренеров и хоккеистов',
-  features: [
-    { id: '1', title: 'Тактическая доска', description: 'Рисуйте схемы на хоккейной площадке. Линии, стрелки, иконки игроков — всё под рукой.', icon: 'target' },
-    { id: '2', title: 'План-конспекты', description: 'Создавайте подробные конспекты тренировок с визуальными схемами и текстовыми заметками.', icon: 'file' },
-    { id: '3', title: 'Экспорт', description: 'Скачивайте план-конспекты в PDF и Word. Редактируемый текст и чёткие схемы.', icon: 'download' }
-  ]
+  features: LANDING_FEATURES_DEFAULTS.map((f) => ({ ...f }))
 }
 
 const TABS = [
   { id: 'brand', label: 'Логотип и название' },
   { id: 'canvas', label: 'Фон Canvas' },
   { id: 'hero', label: 'Hero' },
-  { id: 'features', label: 'Преимущества' },
   { id: 'about', label: 'О нас' },
+  { id: 'features', label: 'Преимущества' },
+  { id: 'tariffs', label: 'Тарифы' },
   { id: 'contacts', label: 'Контакты' },
   { id: 'footer', label: 'Футер' }
 ]
@@ -50,7 +77,7 @@ function FeatureIcon({ icon, size = 32 }) {
 export default function PageEditor({ pages, onChange, onSave, saving, success }) {
   const [activeTab, setActiveTab] = useState('brand')
   const displayPages = { ...defaultPages, ...pages }
-  const features = Array.isArray(displayPages.features) ? displayPages.features : defaultPages.features
+  const features = mergeEditorFeatures(displayPages.features, LANDING_FEATURES_DEFAULTS)
 
   function updateFeatures(newFeatures) {
     onChange(p => ({ ...p, features: newFeatures }))
@@ -232,6 +259,16 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
             </div>
           )}
 
+          {activeTab === 'tariffs' && (
+            <div className="page-editor-fields">
+              <p className="form-hint page-editor-tariffs-hint">
+                Тексты списков, цены и состав тарифов на лендинге берутся из{' '}
+                <code>src/constants/tariffs.js</code> (как на главной странице). Здесь в превью справа
+                отображается актуальный блок «Тарифы» с переключателем месяц/год.
+              </p>
+            </div>
+          )}
+
           {activeTab === 'features' && (
             <div className="page-editor-fields">
               <div className="page-editor-features-actions">
@@ -292,6 +329,15 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
           {activeTab === 'about' && (
             <div className="page-editor-fields">
               <div className="form-row">
+                <label>Заголовок блока «О нас»</label>
+                <input
+                  type="text"
+                  value={displayPages.aboutLead || ''}
+                  onChange={e => onChange(p => ({ ...p, aboutLead: e.target.value }))}
+                  placeholder="Крупный заголовок над текстом"
+                />
+              </div>
+              <div className="form-row">
                 <label>Текст «О нас»</label>
                 <textarea
                   rows={6}
@@ -307,21 +353,86 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
           {activeTab === 'contacts' && (
             <div className="page-editor-fields">
               <div className="form-row">
-                <label>Email контактов</label>
+                <label>Адрес</label>
+                <textarea
+                  rows={2}
+                  value={displayPages.contactsAddress || ''}
+                  onChange={e => onChange(p => ({ ...p, contactsAddress: e.target.value }))}
+                  placeholder="Индекс, город, улица"
+                  className="admin-textarea"
+                />
+              </div>
+              <div className="form-row">
+                <label>Телефон</label>
+                <input
+                  type="text"
+                  value={displayPages.contactsPhone || ''}
+                  onChange={e => onChange(p => ({ ...p, contactsPhone: e.target.value }))}
+                  placeholder="+7 (000) 000-00-00"
+                />
+              </div>
+              <div className="form-row">
+                <label>Email</label>
                 <input
                   type="email"
                   value={displayPages.contactsEmail || ''}
                   onChange={e => onChange(p => ({ ...p, contactsEmail: e.target.value }))}
-                  placeholder="support@example.com"
+                  placeholder="info@example.com"
                 />
               </div>
               <div className="form-row">
-                <label>Примечание контактов</label>
+                <label>Соцсети: подписи (BK / TG / MAX)</label>
+                <div className="page-editor-inline-row">
+                  <input
+                    type="text"
+                    value={displayPages.contactsSocialVkLabel || ''}
+                    onChange={e => onChange(p => ({ ...p, contactsSocialVkLabel: e.target.value }))}
+                    placeholder="BK"
+                  />
+                  <input
+                    type="text"
+                    value={displayPages.contactsSocialTgLabel || ''}
+                    onChange={e => onChange(p => ({ ...p, contactsSocialTgLabel: e.target.value }))}
+                    placeholder="TG"
+                  />
+                  <input
+                    type="text"
+                    value={displayPages.contactsSocialMaxLabel || ''}
+                    onChange={e => onChange(p => ({ ...p, contactsSocialMaxLabel: e.target.value }))}
+                    placeholder="MAX"
+                  />
+                </div>
+              </div>
+              <div className="form-row">
+                <label>Соцсети: ссылки (если пусто — только текст)</label>
+                <input
+                  type="url"
+                  value={displayPages.contactsSocialVkUrl || ''}
+                  onChange={e => onChange(p => ({ ...p, contactsSocialVkUrl: e.target.value }))}
+                  placeholder="https://vk.com/..."
+                />
+                <input
+                  type="url"
+                  value={displayPages.contactsSocialTgUrl || ''}
+                  onChange={e => onChange(p => ({ ...p, contactsSocialTgUrl: e.target.value }))}
+                  placeholder="https://t.me/..."
+                  style={{ marginTop: 8 }}
+                />
+                <input
+                  type="url"
+                  value={displayPages.contactsSocialMaxUrl || ''}
+                  onChange={e => onChange(p => ({ ...p, contactsSocialMaxUrl: e.target.value }))}
+                  placeholder="https://..."
+                  style={{ marginTop: 8 }}
+                />
+              </div>
+              <div className="form-row">
+                <label>Доп. примечание под контактами (необязательно)</label>
                 <input
                   type="text"
                   value={displayPages.contactsNote || ''}
                   onChange={e => onChange(p => ({ ...p, contactsNote: e.target.value }))}
-                  placeholder="Мы ответим в течение 24 часов"
+                  placeholder=""
                 />
               </div>
             </div>
@@ -330,12 +441,63 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
           {activeTab === 'footer' && (
             <div className="page-editor-fields">
               <div className="form-row">
-                <label>Текст футера</label>
+                <label>Название у логотипа в футере</label>
+                <input
+                  type="text"
+                  value={displayPages.footerBrandName || ''}
+                  onChange={e => onChange(p => ({ ...p, footerBrandName: e.target.value }))}
+                  placeholder="МОЙ ХОККЕЙ"
+                />
+              </div>
+              <div className="form-row">
+                <label>Бренд в строке «год — …» (центр)</label>
+                <input
+                  type="text"
+                  value={displayPages.footerCopyrightBrand || ''}
+                  onChange={e => onChange(p => ({ ...p, footerCopyrightBrand: e.target.value }))}
+                  placeholder="MY HOCKEY"
+                />
+              </div>
+              <div className="form-row">
+                <label>Строка ©</label>
+                <input
+                  type="text"
+                  value={displayPages.footerRightsLine || ''}
+                  onChange={e => onChange(p => ({ ...p, footerRightsLine: e.target.value }))}
+                  placeholder="© Все права защищены"
+                />
+              </div>
+              <div className="form-row">
+                <label>ИП</label>
+                <input
+                  type="text"
+                  value={displayPages.footerLegalIp || ''}
+                  onChange={e => onChange(p => ({ ...p, footerLegalIp: e.target.value }))}
+                />
+              </div>
+              <div className="form-row">
+                <label>ИНН</label>
+                <input
+                  type="text"
+                  value={displayPages.footerLegalInn || ''}
+                  onChange={e => onChange(p => ({ ...p, footerLegalInn: e.target.value }))}
+                />
+              </div>
+              <div className="form-row">
+                <label>ОГРНИП</label>
+                <input
+                  type="text"
+                  value={displayPages.footerLegalOgrnip || ''}
+                  onChange={e => onChange(p => ({ ...p, footerLegalOgrnip: e.target.value }))}
+                />
+              </div>
+              <div className="form-row">
+                <label>Запасной однострочный текст (legacy)</label>
                 <input
                   type="text"
                   value={displayPages.footerText || ''}
                   onChange={e => onChange(p => ({ ...p, footerText: e.target.value }))}
-                  placeholder="© Hockey Tactics"
+                  placeholder="Старый формат, если нужен для совместимости"
                 />
               </div>
             </div>
@@ -471,18 +633,34 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
 }
 
 function LandingPreviewContent({ pages, features }) {
+  const [billingPeriod, setBillingPeriod] = useState('year')
+
+  const socialItems = [
+    { url: pages.contactsSocialVkUrl ?? defaultPages.contactsSocialVkUrl, label: pages.contactsSocialVkLabel ?? defaultPages.contactsSocialVkLabel },
+    { url: pages.contactsSocialTgUrl ?? defaultPages.contactsSocialTgUrl, label: pages.contactsSocialTgLabel ?? defaultPages.contactsSocialTgLabel },
+    { url: pages.contactsSocialMaxUrl ?? defaultPages.contactsSocialMaxUrl, label: pages.contactsSocialMaxLabel ?? defaultPages.contactsSocialMaxLabel }
+  ]
+
   return (
-    <div className="landing-preview">
-      <div className="landing-preview-header-bar">
-        <div className="landing-preview-logo">
-          {pages.logoUrl ? (
-            <img src={pages.logoUrl} alt="" className="landing-preview-logo-img" />
-          ) : (
-            <span className="landing-preview-logo-icon"><IconHockeyStick size={24} /></span>
-          )}
-          <span>{pages.siteName || 'Hockey Tactics'}</span>
+    <div className="landing-preview landing-preview-ice">
+      <header className="landing-preview-topbar">
+        <div className="landing-preview-topbar-inner">
+          <div className="landing-preview-brand">
+            <img src={pages.logoUrl || '/logo-default.png'} alt="" className="landing-preview-brand-img" />
+            <span className="landing-preview-brand-text">{pages.siteName || 'Hockey Tactics'}</span>
+          </div>
+          <div className="landing-preview-nav-pill" aria-hidden>
+            <span>О нас</span>
+            <span>Цена</span>
+            <span>Контакты</span>
+          </div>
+          <div className="landing-preview-auth-pills" aria-hidden>
+            <span className="landing-preview-pill landing-preview-pill--ghost">Войти</span>
+            <span className="landing-preview-pill">Регистрация</span>
+          </div>
         </div>
-      </div>
+      </header>
+
       <div className="landing-preview-hero">
         <div className="landing-preview-hero-bg" />
         <div className="landing-preview-hero-content">
@@ -501,37 +679,116 @@ function LandingPreviewContent({ pages, features }) {
         </div>
       </div>
 
-      <section className="landing-preview-about">
-        <h2>О нас</h2>
-        <p>{pages.aboutText}</p>
-      </section>
-
-      <section className="landing-preview-features">
-        <h2>Возможности платформы</h2>
+      <section className="landing-preview-about-features">
+        <div className="landing-preview-spotlight">
+          <h2 className="landing-preview-spotlight-title">{pages.aboutLead || defaultPages.aboutLead}</h2>
+          <p className="landing-preview-spotlight-text">{pages.aboutText ?? defaultPages.aboutText}</p>
+        </div>
+        <h2 className="landing-preview-features-pill">Возможности платформы</h2>
         <div className="landing-preview-features-grid">
-          {features.map(f => (
-            <div key={f.id} className="landing-preview-card">
-              <span className="landing-preview-card-icon">
-                <FeatureIcon icon={f.icon} size={28} />
+          {features.map((f, idx) => (
+            <div key={f.id} className={`landing-preview-card landing-preview-card-mockup landing-preview-card-tone-${(idx % 4) + 1}`}>
+              <span className="landing-preview-card-icon-ring">
+                <FeatureIcon icon={f.icon} size={22} />
               </span>
-              <h3>{f.title}</h3>
-              <p>{f.description}</p>
+              <div className="landing-preview-card-head">{f.title}</div>
+              <p className="landing-preview-card-desc">{f.description}</p>
             </div>
           ))}
         </div>
       </section>
 
-      <section className="landing-preview-contacts">
-        <h2>Контакты</h2>
-        <div className="landing-preview-contacts-card">
-          <p>По вопросам сотрудничества и поддержки:</p>
-          <p className="contacts-email">{pages.contactsEmail}</p>
-          <p className="contacts-note">{pages.contactsNote}</p>
+      <section className="landing-preview-price-mockup">
+        <div className="landing-preview-price-heading">
+          <h2>Тарифы</h2>
+          <div className="landing-preview-billing-toggle" role="group" aria-label="Период">
+            <button type="button" className={billingPeriod === 'month' ? 'active' : ''} onClick={() => setBillingPeriod('month')}>
+              Раз в месяц
+            </button>
+            <button type="button" className={billingPeriod === 'year' ? 'active' : ''} onClick={() => setBillingPeriod('year')}>
+              Раз в год (-15%)
+            </button>
+          </div>
+        </div>
+        <div className="landing-preview-price-grid">
+          {LANDING_TARIFFS.map((t) => (
+            <div key={t.id} className={`landing-preview-tcard ${t.id === 'pro' ? 'landing-preview-tcard--popular' : ''}`}>
+              {t.id === 'pro' && <div className="landing-preview-tcard-popular">Популярный</div>}
+              <Link to={TARIFFS_REGISTER_HREF} className="landing-preview-tcard-head">
+                <span className="landing-preview-tcard-name">{t.name}</span>
+                <span className="landing-preview-tcard-choose">Выбрать</span>
+              </Link>
+              <p className="landing-preview-tcard-tagline">{t.description}</p>
+              <ul className="landing-preview-tcard-features">
+                {t.features.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <p className="landing-preview-tcard-price">{formatPreviewTariffPrice(t, billingPeriod)}</p>
+            </div>
+          ))}
         </div>
       </section>
 
-      <footer className="landing-preview-footer">
-        <p>{pages.footerText}</p>
+      <section className="landing-preview-contacts landing-preview-contacts-mockup">
+        <div className="landing-preview-contacts-title-card">
+          <h2>Контакты</h2>
+        </div>
+        <div className="landing-preview-contacts-info-card">
+          <dl className="landing-preview-contacts-dl">
+            <div className="landing-preview-contacts-row">
+              <dt>Адрес:</dt>
+              <dd>{pages.contactsAddress ?? defaultPages.contactsAddress}</dd>
+            </div>
+            <div className="landing-preview-contacts-row">
+              <dt>Телефон:</dt>
+              <dd>{pages.contactsPhone ?? defaultPages.contactsPhone}</dd>
+            </div>
+            <div className="landing-preview-contacts-row">
+              <dt>Почта:</dt>
+              <dd>{pages.contactsEmail ?? defaultPages.contactsEmail}</dd>
+            </div>
+            <div className="landing-preview-contacts-row landing-preview-contacts-row--social">
+              <dt>Наши социальные сети:</dt>
+              <dd className="landing-preview-contacts-social">
+                {socialItems.map((s, idx) => (
+                  <span key={`soc-${idx}`} className="landing-preview-social-item">
+                    {s.url ? (
+                      <a href={s.url} target="_blank" rel="noopener noreferrer">
+                        {s.label}
+                      </a>
+                    ) : (
+                      <span>{s.label}</span>
+                    )}
+                  </span>
+                ))}
+              </dd>
+            </div>
+          </dl>
+          {(pages.contactsNote || defaultPages.contactsNote) ? (
+            <p className="landing-preview-contacts-extra">{pages.contactsNote ?? defaultPages.contactsNote}</p>
+          ) : null}
+        </div>
+      </section>
+
+      <footer className="landing-preview-footer landing-preview-footer-mockup">
+        <div className="landing-preview-footer-inner">
+          <div className="landing-preview-footer-col">
+            <Link to="/" className="landing-preview-footer-brand">
+              <img src={pages.logoUrl || '/logo-default.png'} alt="" className="landing-preview-footer-logo" />
+              <span>{pages.footerBrandName ?? defaultPages.footerBrandName}</span>
+            </Link>
+          </div>
+          <div className="landing-preview-footer-col landing-preview-footer-center">
+            <span>{new Date().getFullYear()} — {pages.footerCopyrightBrand ?? defaultPages.footerCopyrightBrand}</span>
+            <span>{pages.footerRightsLine ?? defaultPages.footerRightsLine}</span>
+          </div>
+          <div className="landing-preview-footer-col landing-preview-footer-legal">
+            <span>{pages.footerLegalIp ?? defaultPages.footerLegalIp}</span>
+            <span>{pages.footerLegalInn ?? defaultPages.footerLegalInn}</span>
+            <span>{pages.footerLegalOgrnip ?? defaultPages.footerLegalOgrnip}</span>
+          </div>
+        </div>
       </footer>
     </div>
   )

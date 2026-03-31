@@ -1,7 +1,14 @@
-import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useState, useMemo } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import './Auth.css'
+
+function safeRedirectPath(raw) {
+  if (!raw || typeof raw !== 'string') return null
+  const t = raw.trim()
+  if (!t.startsWith('/') || t.startsWith('//')) return null
+  return t
+}
 
 export default function Login() {
   const [login, setLogin] = useState('')
@@ -10,6 +17,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const { login: authLogin } = useAuth()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const afterAuthPath = useMemo(() => safeRedirectPath(searchParams.get('redirect')), [searchParams])
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -22,9 +31,18 @@ export default function Login() {
         body: JSON.stringify({ login, password })
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Ошибка входа')
+      if (!res.ok) {
+        if (res.status === 403 && data.code === 'ACCOUNT_BLOCKED') {
+          throw new Error(data.error || 'Аккаунт заблокирован')
+        }
+        throw new Error(data.error || 'Ошибка входа')
+      }
       authLogin(data.user, data.token)
-      navigate(data.user.isAdmin ? '/admin' : '/cabinet')
+      if (afterAuthPath) {
+        navigate(afterAuthPath)
+      } else {
+        navigate(data.user.isAdmin ? '/admin' : '/cabinet')
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -63,7 +81,10 @@ export default function Login() {
           </button>
         </form>
         <p className="auth-link">
-          Нет аккаунта? <Link to="/register">Зарегистрироваться</Link>
+          Нет аккаунта?{' '}
+          <Link to={afterAuthPath ? `/register?redirect=${encodeURIComponent(afterAuthPath)}` : '/register'}>
+            Зарегистрироваться
+          </Link>
         </p>
       </div>
     </div>

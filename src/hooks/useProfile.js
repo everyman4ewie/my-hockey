@@ -5,9 +5,11 @@ import { useAuth } from '../context/AuthContext'
  * Загрузка профиля с использованием (tariff, usage) для проверки лимитов.
  */
 export function useProfile() {
-  const { getToken, user } = useAuth()
+  const { getToken, user, logout } = useAuth()
   const [profile, setProfile] = useState({
     tariff: 'free',
+    effectiveTariff: 'free',
+    tariffSuspended: false,
     teamLogo: null,
     tariffExpiresAt: null,
     subscriptionNextChargeAt: null,
@@ -22,6 +24,8 @@ export function useProfile() {
     if (!user?.id) {
       setProfile({
         tariff: 'free',
+        effectiveTariff: 'free',
+        tariffSuspended: false,
         teamLogo: null,
         tariffExpiresAt: null,
         subscriptionNextChargeAt: null,
@@ -35,7 +39,9 @@ export function useProfile() {
     }
     if (user?.isAdmin) {
       setProfile({
-        tariff: 'pro',
+        tariff: 'admin',
+        effectiveTariff: 'admin',
+        tariffSuspended: false,
         teamLogo: null,
         tariffExpiresAt: null,
         subscriptionNextChargeAt: null,
@@ -48,10 +54,18 @@ export function useProfile() {
       return
     }
     fetch('/api/user/profile', { headers: { Authorization: getToken() } })
-      .then(r => r.json())
-      .then(data => {
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}))
+        if (r.status === 403 && data.code === 'ACCOUNT_BLOCKED') {
+          logout()
+          window.location.assign('/login')
+          return
+        }
+        if (!r.ok) throw new Error(data.error || 'Ошибка профиля')
         setProfile({
           tariff: data.tariff || 'free',
+          effectiveTariff: data.effectiveTariff || data.tariff || 'free',
+          tariffSuspended: !!data.tariffSuspended,
           teamLogo: data.teamLogo || null,
           tariffExpiresAt: data.tariffExpiresAt || null,
           subscriptionNextChargeAt: data.subscriptionNextChargeAt || null,
@@ -64,6 +78,8 @@ export function useProfile() {
       .catch(() =>
         setProfile({
           tariff: 'free',
+          effectiveTariff: 'free',
+          tariffSuspended: false,
           teamLogo: null,
           tariffExpiresAt: null,
           subscriptionNextChargeAt: null,
@@ -74,7 +90,7 @@ export function useProfile() {
         })
       )
       .finally(() => setLoading(false))
-  }, [getToken, user?.id, user?.isAdmin])
+  }, [getToken, user?.id, user?.isAdmin, logout])
 
   useEffect(() => { loadProfile() }, [loadProfile])
   return { profile, loading, refreshProfile: loadProfile }

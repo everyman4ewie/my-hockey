@@ -11,7 +11,9 @@ export const TARIFF_LIMITS = {
     maxWordDownloads: 0,
     maxBoardDownloads: -1,
     maxExercisesPerPlan: 3,
-    canDownloadPlanImages: true
+    canDownloadPlanImages: true,
+    maxTacticalVideoExports: 3,
+    canSaveDownloadTacticalVideo: false
   },
   pro: {
     maxPlans: -1,
@@ -19,7 +21,19 @@ export const TARIFF_LIMITS = {
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
     maxExercisesPerPlan: -1,
-    canDownloadPlanImages: true
+    canDownloadPlanImages: true,
+    maxTacticalVideoExports: 10,
+    canSaveDownloadTacticalVideo: false
+  },
+  pro_plus: {
+    maxPlans: -1,
+    maxPdfDownloads: -1,
+    maxWordDownloads: -1,
+    maxBoardDownloads: -1,
+    maxExercisesPerPlan: -1,
+    canDownloadPlanImages: true,
+    maxTacticalVideoExports: -1,
+    canSaveDownloadTacticalVideo: true
   },
   admin: {
     maxPlans: -1,
@@ -27,7 +41,9 @@ export const TARIFF_LIMITS = {
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
     maxExercisesPerPlan: -1,
-    canDownloadPlanImages: true
+    canDownloadPlanImages: true,
+    maxTacticalVideoExports: -1,
+    canSaveDownloadTacticalVideo: true
   }
 }
 
@@ -56,6 +72,9 @@ export function canPerform(tariffId, action, usage) {
       return (u.boardDownloads || 0) < limits.maxBoardDownloads
     case 'downloadPlanImage':
       return limits.canDownloadPlanImages
+    case 'tacticalVideoExport':
+      if (limits.maxTacticalVideoExports < 0) return true
+      return (u.tacticalVideoExports || 0) < limits.maxTacticalVideoExports
     default:
       return false
   }

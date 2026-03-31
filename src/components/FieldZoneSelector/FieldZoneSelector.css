@@ -26,7 +26,8 @@
   transition: transform 0.2s;
 }
 
-.field-zone-trigger svg.open {
+.field-zone-trigger svg.open,
+.field-zone-chevron.open {
   transform: rotate(180deg);
 }
 

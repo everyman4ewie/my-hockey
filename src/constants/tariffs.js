@@ -1,10 +1,12 @@
 /**
- * Тарифные планы: Бесплатный, Про (покупка), По выдаче админа (только админ).
+ * Тарифные планы: Бесплатный, Про, Про+ (покупка), По выдаче админа.
  */
 export function normalizeTariffId(id) {
   if (!id || id === 'free') return 'free'
   if (id === 'admin' || id === 'ultima') return 'admin'
-  return 'pro'
+  if (id === 'pro_plus') return 'pro_plus'
+  if (id === 'pro') return 'pro'
+  return 'free'
 }
 
 export const TARIFFS = [
@@ -15,11 +17,13 @@ export const TARIFFS = [
     badgeClass: '',
     priceMonth: 0,
     priceYear: 0,
-    description: 'Все функции платформы. Экспорт план-конспектов только в PDF, до 3 упражнений в плане.',
+    description: 'Все функции платформы навсегда',
     features: [
-      'Все функции платформы',
-      'Скачивание план-конспектов в PDF',
-      'Не более 3 упражнений в одном план-конспекте'
+      'Создание план-конспектов до 3 упражнений в одном',
+      'Сохранение план-конспектов в формате PDF',
+      'Создание тактических досок без ограничений',
+      'Сохранение тактических досок без ограничений в формате png',
+      'Создание 3 видео-тренировок на весь срок использования без возможности редактирования'
     ],
     limits: {},
     buyable: false,
@@ -32,11 +36,30 @@ export const TARIFFS = [
     badgeClass: 'pro',
     priceMonth: 499,
     priceYear: Math.round(499 * 12 * 0.85),
-    description: 'Полный доступ: любые форматы, без ограничений по упражнениям.',
+    description: 'Полный доступ к упражнениям',
     features: [
-      'Все функции без ограничений',
-      'Экспорт в PDF, Word, PNG',
-      'Любое число упражнений в план-конспекте'
+      'Все что в бесплатном тарифе',
+      'Сохранение план-конспектов в формате Word',
+      'Создание план-конспектов без ограничений упражнений',
+      'Создание до 10 видео-тренировок в месяц с ограниченной возможностью редактирования'
+    ],
+    limits: {},
+    buyable: true,
+    adminOnly: false
+  },
+  {
+    id: 'pro_plus',
+    name: 'Про+',
+    badge: 'Про+',
+    badgeClass: 'pro-plus',
+    priceMonth: 699,
+    priceYear: Math.round(699 * 12 * 0.85),
+    description: 'Полный доступ к видео-тренировкам',
+    features: [
+      'Все что в тарифе Про',
+      'Создание видео-тренировок без ограничений',
+      'Редактирование видео-тренировок без ограничений',
+      'Скачивание видео-тренировок без ограничений'
     ],
     limits: {},
     buyable: true,
@@ -49,9 +72,9 @@ export const TARIFFS = [
     badgeClass: 'ultima',
     priceMonth: 0,
     priceYear: 0,
-    description: 'То же, что Про. Выдаётся только администратором.',
+    description: 'То же, что Про+. Выдаётся только администратором.',
     features: [
-      'То же, что тариф Про',
+      'То же, что тариф Про+',
       'Назначается администратором'
     ],
     limits: {},
@@ -63,7 +86,9 @@ export const TARIFFS = [
 export const getTariffById = (id) => {
   if (!id || id === 'free') return TARIFFS.find(t => t.id === 'free')
   if (id === 'admin' || id === 'ultima') return TARIFFS.find(t => t.id === 'admin')
-  return TARIFFS.find(t => t.id === 'pro') || TARIFFS[0]
+  if (id === 'pro_plus') return TARIFFS.find(t => t.id === 'pro_plus')
+  if (id === 'pro') return TARIFFS.find(t => t.id === 'pro')
+  return TARIFFS.find(t => t.id === 'free')
 }
 
 export const getBuyableTariffs = () => TARIFFS.filter(t => t.buyable)

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { ChevronDown, Check } from 'lucide-react'
 import HockeyBoard from '../components/HockeyBoard/HockeyBoard'
@@ -184,7 +184,7 @@ export default function TacticalBoard() {
   const pathsPx = useMemo(() => denormalizePaths(paths, canvasSize.w, canvasSize.h), [paths, canvasSize.w, canvasSize.h])
   const iconsPx = useMemo(() => denormalizeIcons(icons, canvasSize.w, canvasSize.h), [icons, canvasSize.w, canvasSize.h])
 
-  const boardLimits = getTariffLimits(profile.tariff)
+  const boardLimits = getTariffLimits(profile.effectiveTariff ?? profile.tariff)
   const canDownloadPng = boardLimits.maxBoardDownloads !== 0
   const handleDownloadPng = useCallback(async (canvas) => {
     const r = await checkUsageBeforeDownload(getToken, 'board')
@@ -215,6 +215,12 @@ export default function TacticalBoard() {
           <button type="button" className="btn-outline" onClick={() => navigate(user?.isAdmin ? '/admin' : '/cabinet')}>
             К кабинету
           </button>
+          <Link
+            to={id ? `/board/video?from=${encodeURIComponent(id)}` : '/board/video'}
+            className="tactical-board-btn-video"
+          >
+            Создать видео
+          </Link>
           <button
             type="button"
             className="btn-primary"

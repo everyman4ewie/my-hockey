@@ -2,6 +2,7 @@
 export const TARIFF_IDS = {
   FREE: 'free',
   PRO: 'pro',
+  PRO_PLUS: 'pro_plus',
   ADMIN: 'admin'
 }
 
@@ -9,7 +10,9 @@ export const TARIFF_IDS = {
 export function normalizeTariffIdForLimits(id) {
   if (!id || id === 'free') return 'free'
   if (id === 'admin' || id === 'ultima') return 'admin'
-  return 'pro'
+  if (id === 'pro_plus') return 'pro_plus'
+  if (id === 'pro') return 'pro'
+  return 'free'
 }
 
 export const TARIFFS = [
@@ -24,7 +27,8 @@ export const TARIFFS = [
     features: [
       'Все функции платформы',
       'План-конспекты: скачивание только в PDF',
-      'Не более 3 упражнений в одном план-конспекте'
+      'Не более 3 упражнений в одном план-конспекте',
+      'Тактическое видео: до 3 в кабинете, до 10 кадров; без удаления, после сохранения — только просмотр'
     ],
     limits: {}
   },
@@ -39,7 +43,23 @@ export const TARIFFS = [
     features: [
       'Все функции без ограничений',
       'Любые форматы экспорта (PDF, Word, PNG)',
-      'Любое число упражнений в план-конспекте'
+      'Любое число упражнений в план-конспекте',
+      'Тактическое видео: до 10 новых в месяц; до 3 пересохранений одного видео'
+    ],
+    limits: {}
+  },
+  {
+    id: TARIFF_IDS.PRO_PLUS,
+    name: 'Про+',
+    badge: 'Про+',
+    priceMonth: 699,
+    priceYear: 7199,
+    purchasable: true,
+    adminOnly: false,
+    features: [
+      'Всё из тарифа Про',
+      'Тактические видео без ограничений',
+      'MP4 при скачивании автоматически в «Мои видео»'
     ],
     limits: {}
   },
@@ -52,7 +72,7 @@ export const TARIFFS = [
     purchasable: false,
     adminOnly: true,
     features: [
-      'То же, что Про',
+      'То же, что Про+',
       'Выдаётся только администратором'
     ],
     limits: {}
@@ -62,5 +82,7 @@ export const TARIFFS = [
 export function getTariffById(id) {
   if (!id || id === 'free') return TARIFFS.find(t => t.id === 'free')
   if (id === 'admin' || id === 'ultima') return TARIFFS.find(t => t.id === 'admin')
-  return TARIFFS.find(t => t.id === 'pro') || TARIFFS[0]
+  if (id === 'pro_plus') return TARIFFS.find(t => t.id === 'pro_plus')
+  if (id === 'pro') return TARIFFS.find(t => t.id === 'pro')
+  return TARIFFS.find(t => t.id === 'free')
 }

@@ -10,6 +10,7 @@ import AdminCabinet from './pages/AdminCabinet'
 import PlanCreate from './pages/PlanCreate'
 import PlanEdit from './pages/PlanEdit'
 import TacticalBoard from './pages/TacticalBoard'
+import TacticalVideo from './pages/TacticalVideo'
 import PaymentCheckout from './pages/PaymentCheckout'
 import PaymentReturn from './pages/PaymentReturn'
 
@@ -43,6 +44,9 @@ export default function App() {
           } />
           <Route path="/board" element={
             <PrivateRoute><TacticalBoard /></PrivateRoute>
+          } />
+          <Route path="/board/video" element={
+            <PrivateRoute><TacticalVideo /></PrivateRoute>
           } />
           <Route path="/board/:id" element={
             <PrivateRoute><TacticalBoard /></PrivateRoute>

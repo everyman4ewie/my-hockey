@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Home, User, ClipboardList, CreditCard } from 'lucide-react'
+import { Home, User, ClipboardList, CreditCard, Video } from 'lucide-react'
 import { TARIFFS, getTariffById } from '../constants/tariffs'
 import './Cabinet.css'
 
@@ -13,11 +13,12 @@ export default function Cabinet() {
 
   useEffect(() => {
     const s = searchParams.get('section')
-    if (s && ['profile', 'plans', 'tariffs'].includes(s)) setSection(s)
+    if (s && ['profile', 'plans', 'tariffs', 'videos'].includes(s)) setSection(s)
   }, [searchParams])
   const [plansFilter, setPlansFilter] = useState('all') // 'all' | 'boards' | 'plans'
   const [plans, setPlans] = useState([])
   const [boards, setBoards] = useState([])
+  const [videos, setVideos] = useState([])
   const [loading, setLoading] = useState(true)
   const [profile, setProfile] = useState({
     name: '',
@@ -26,6 +27,8 @@ export default function Cabinet() {
     photo: null,
     teamLogo: null,
     tariff: 'free',
+    effectiveTariff: 'free',
+    tariffSuspended: false,
     tariffExpiresAt: null,
     subscriptionNextChargeAt: null,
     subscriptionPeriod: null,
@@ -43,14 +46,19 @@ export default function Cabinet() {
   const [tariffPurchasing, setTariffPurchasing] = useState(null) // tariffId being purchased
   const [subscriptionCancelLoading, setSubscriptionCancelLoading] = useState(false)
   const [subscriptionCancelError, setSubscriptionCancelError] = useState('')
+  const storedTariffInfo = getTariffById(profile.tariff || 'free')
+  const profileTariffId = getTariffById((profile.effectiveTariff ?? profile.tariff) || 'free').id
+  const showSubscriptionPanel =
+    (storedTariffInfo.id === 'pro' || storedTariffInfo.id === 'pro_plus') && !profile.tariffSuspended
 
   const loadPlans = useCallback(() => {
     setLoading(true)
     Promise.all([
       fetch('/api/user/plans', { headers: { Authorization: getToken() } }).then(r => r.json()).catch(() => []),
-      fetch('/api/user/boards', { headers: { Authorization: getToken() } }).then(r => r.json()).catch(() => [])
+      fetch('/api/user/boards', { headers: { Authorization: getToken() } }).then(r => r.json()).catch(() => []),
+      fetch('/api/user/videos', { headers: { Authorization: getToken() } }).then(r => r.json()).catch(() => [])
     ])
-      .then(([p, b]) => { setPlans(p); setBoards(b) })
+      .then(([p, b, v]) => { setPlans(p); setBoards(b); setVideos(Array.isArray(v) ? v : []) })
       .finally(() => setLoading(false))
   }, [getToken])
 
@@ -60,8 +68,14 @@ export default function Cabinet() {
       return
     }
     fetch('/api/user/profile', { headers: { Authorization: getToken() } })
-      .then(r => r.json())
-      .then(data => {
+      .then(async (r) => {
+        const data = await r.json().catch(() => ({}))
+        if (r.status === 403 && data.code === 'ACCOUNT_BLOCKED') {
+          logout()
+          window.location.assign('/login')
+          return
+        }
+        if (!r.ok) return
         setProfile({
           name: data.name || '',
           birthDate: data.birthDate || '',
@@ -69,6 +83,8 @@ export default function Cabinet() {
           photo: data.photo,
           teamLogo: data.teamLogo,
           tariff: data.tariff || 'free',
+          effectiveTariff: data.effectiveTariff || data.tariff || 'free',
+          tariffSuspended: !!data.tariffSuspended,
           tariffExpiresAt: data.tariffExpiresAt || null,
           subscriptionNextChargeAt: data.subscriptionNextChargeAt || null,
           subscriptionPeriod: data.subscriptionPeriod || null,
@@ -79,7 +95,7 @@ export default function Cabinet() {
       })
       .catch(() => {})
       .finally(() => setProfileLoading(false))
-  }, [getToken, user?.isAdmin, updateUser])
+  }, [getToken, user?.isAdmin, updateUser, logout])
 
   useEffect(() => {
     loadPlans()
@@ -90,7 +106,7 @@ export default function Cabinet() {
   }, [loadProfile])
 
   async function handleSubscriptionCancel() {
-    if (!window.confirm('Отключить автопродление? Сохранённая карта будет отвязана, дальнейшие списания не выполняются. Тариф «Про» действует до даты окончания оплаченного периода.')) {
+    if (!window.confirm('Отключить автопродление? Сохранённая карта будет отвязана, дальнейшие списания не выполняются. Тариф «Про» или «Про+» действует до даты окончания оплаченного периода.')) {
       return
     }
     setSubscriptionCancelError('')
@@ -113,6 +129,31 @@ export default function Cabinet() {
       setSubscriptionCancelError(e.message || 'Ошибка')
     } finally {
       setSubscriptionCancelLoading(false)
+    }
+  }
+
+  function goSection(s) {
+    setSection(s)
+    navigate(`/cabinet?section=${s}`, { replace: true })
+  }
+
+  async function handleDownloadSavedVideo(v) {
+    try {
+      const res = await fetch(`/api/user/videos/${v.id}/file`, { headers: { Authorization: getToken() } })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Не удалось скачать')
+      }
+      const blob = await res.blob()
+      const safe = (v.title || 'video').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'video'
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${safe}.mp4`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      window.alert(e.message || 'Ошибка скачивания')
     }
   }
 
@@ -199,7 +240,7 @@ export default function Cabinet() {
           <button
             type="button"
             className={`cabinet-nav-item ${section === 'profile' ? 'active' : ''}`}
-            onClick={() => setSection('profile')}
+            onClick={() => goSection('profile')}
           >
             <span className="cabinet-nav-icon"><User size={20} /></span>
             Личные данные
@@ -207,7 +248,7 @@ export default function Cabinet() {
           <button
             type="button"
             className={`cabinet-nav-item ${section === 'plans' ? 'active' : ''}`}
-            onClick={() => setSection('plans')}
+            onClick={() => goSection('plans')}
           >
             <span className="cabinet-nav-icon"><ClipboardList size={20} /></span>
             Мои план-конспекты
@@ -215,10 +256,18 @@ export default function Cabinet() {
           <button
             type="button"
             className={`cabinet-nav-item ${section === 'tariffs' ? 'active' : ''}`}
-            onClick={() => setSection('tariffs')}
+            onClick={() => goSection('tariffs')}
           >
             <span className="cabinet-nav-icon"><CreditCard size={20} /></span>
             Тарифы
+          </button>
+          <button
+            type="button"
+            className={`cabinet-nav-item ${section === 'videos' ? 'active' : ''}`}
+            onClick={() => goSection('videos')}
+          >
+            <span className="cabinet-nav-icon"><Video size={20} /></span>
+            Мои видео
           </button>
         </nav>
         <div className="cabinet-sidebar-footer">
@@ -239,7 +288,10 @@ export default function Cabinet() {
             <div>
               <h1 className="cabinet-title-with-tariff">
                 {profile.name || user?.login || 'Личный кабинет'}
-                <span className="cabinet-tariff-badge">{getTariffById(profile.tariff || 'free').badge}</span>
+                <span className="cabinet-tariff-badge">
+                  {getTariffById(profile.tariff || 'free').badge}
+                  {profile.tariffSuspended ? ' — приостановлен' : ''}
+                </span>
               </h1>
               <p className="cabinet-email">{user?.email}</p>
             </div>
@@ -386,7 +438,7 @@ export default function Cabinet() {
                 <p className="cabinet-tariffs-subtitle">Выберите подходящий тариф для работы с платформой</p>
                 <div className="cabinet-tariffs-current-badge">
                   <CreditCard size={20} strokeWidth={2} />
-                  <span>Текущий тариф: <strong>{getTariffById(profile.tariff || 'free').badge}</strong></span>
+                  <span>Текущий тариф: <strong>{getTariffById(profile.tariff || 'free').badge}</strong>{profile.tariffSuspended ? ' (приостановлен)' : ''}</span>
                   {profile.tariffExpiresAt && (
                     <span className="cabinet-tariffs-expiry">до {new Date(profile.tariffExpiresAt).toLocaleDateString('ru')}</span>
                   )}
@@ -398,14 +450,14 @@ export default function Cabinet() {
                 </div>
               </div>
 
-              {getTariffById(profile.tariff || 'free').id === 'pro' && (
+              {showSubscriptionPanel && (
                 <div className="cabinet-subscription-panel">
                   <h3 className="cabinet-subscription-panel-title">Подписка и оплата</h3>
 
                   {profile.subscriptionAutoRenew && (
                     <div className="cabinet-subscription-row">
                       <p className="cabinet-subscription-text">
-                        У вас включено автопродление тарифа «Про». Карта сохранена в ЮKassa для следующих списаний.
+                        У вас включено автопродление тарифа «{storedTariffInfo.name}». Карта сохранена в ЮKassa для следующих списаний.
                       </p>
                       {subscriptionCancelError && (
                         <p className="cabinet-error">{subscriptionCancelError}</p>
@@ -424,7 +476,7 @@ export default function Cabinet() {
                   {!profile.subscriptionAutoRenew && profile.subscriptionCancelledAt && (
                     <p className="cabinet-muted cabinet-subscription-text">
                       Автопродление отключено {new Date(profile.subscriptionCancelledAt).toLocaleString('ru')}.
-                      Тариф «Про» действует до{' '}
+                      Тариф «{storedTariffInfo.name}» действует до{' '}
                       {profile.tariffExpiresAt
                         ? new Date(profile.tariffExpiresAt).toLocaleDateString('ru')
                         : '—'}
@@ -452,9 +504,9 @@ export default function Cabinet() {
                 </div>
               </div>
               <div className="cabinet-tariffs-grid">
-                {TARIFFS.filter(t => t.id === 'free' || t.id === 'pro').map(t => {
+                {TARIFFS.filter(t => t.id === 'free' || t.id === 'pro' || t.id === 'pro_plus').map(t => {
                   const curId = getTariffById(profile.tariff || 'free').id
-                  const isCurrent = t.id === curId || (curId === 'admin' && t.id === 'pro')
+                  const isCurrent = t.id === curId || (curId === 'admin' && t.id === 'pro_plus')
                   return (
                   <div key={t.id} className={`tariff-card tariff-card-${t.badgeClass || 'free'} ${isCurrent ? 'tariff-card-current' : ''} ${t.id === 'pro' ? 'tariff-card-popular' : ''}`}>
                     <div className={`tariff-badge tariff-badge-${t.badgeClass || 'free'}`}>{t.badge}</div>
@@ -488,6 +540,100 @@ export default function Cabinet() {
                 )
                 })}
               </div>
+            </div>
+          )}
+
+          {section === 'videos' && (
+            <div className="cabinet-section">
+              <div className="cabinet-plans-header">
+                <h2>Мои видео</h2>
+                <div className="cabinet-plans-actions">
+                  <Link to="/board/video" className="btn-primary">Создать видео</Link>
+                </div>
+              </div>
+              {!user?.isAdmin && profileTariffId === 'pro' && (
+                <div className="cabinet-video-retention-notice" role="status">
+                  Записи старше 3 месяцев с даты создания удаляются автоматически.
+                </div>
+              )}
+              {!user?.isAdmin && profileTariffId === 'pro_plus' && (
+                <div className="cabinet-video-retention-notice" role="status">
+                  Через месяц после создания запись уходит в архив (помечается «В архиве»), через 3 месяца удаляется
+                  автоматически.
+                </div>
+              )}
+              {loading ? (
+                <p className="cabinet-loading">Загрузка...</p>
+              ) : videos.length === 0 ? (
+                <div className="cabinet-empty">
+                  <p>
+                    Пока нет сохранённых видео. На странице «Видео с доски» нажмите «Сохранить в кабинет» (на Про+ файл
+                    также сохраняется при скачивании MP4).
+                  </p>
+                  <div className="cabinet-empty-actions">
+                    <Link to="/board/video" className="btn-primary">Создать видео</Link>
+                  </div>
+                </div>
+              ) : (
+                <div className="plans-grid">
+                  {videos.map((v) => (
+                    <div key={v.id} className="plan-card plan-card-video">
+                      <div className="plan-card-video-body">
+                        <h3>{v.title || 'Видео'}</h3>
+                        <span className="plan-date">
+                          {v.updatedAt
+                            ? `Обновлено ${new Date(v.updatedAt).toLocaleString('ru')}`
+                            : new Date(v.createdAt).toLocaleDateString('ru')}
+                        </span>
+                        {typeof v.keyframeCount === 'number' && (
+                          <span className="plan-date">Кадров: {v.keyframeCount}</span>
+                        )}
+                        {v.readonly && (
+                          <span className="cabinet-video-readonly-tag">Только просмотр</span>
+                        )}
+                        {v.archived && (
+                          <span className="cabinet-video-archived-tag">В архиве</span>
+                        )}
+                      </div>
+                      <div className="cabinet-video-card-actions">
+                        {(user?.isAdmin || profileTariffId === 'pro_plus') && (
+                          <button
+                            type="button"
+                            className="btn-outline btn-small"
+                            onClick={() => handleDownloadSavedVideo(v)}
+                          >
+                            Скачать
+                          </button>
+                        )}
+                        <Link to={`/board/video?videoId=${encodeURIComponent(v.id)}`} className="btn-outline btn-small">
+                          {v.readonly ? 'Просмотр' : 'Редактировать'}
+                        </Link>
+                        {profileTariffId !== 'free' && (
+                          <button
+                            type="button"
+                            className="btn-delete"
+                            onClick={async () => {
+                              if (!window.confirm('Удалить это видео из кабинета?')) return
+                              const res = await fetch(`/api/user/videos/${v.id}`, {
+                                method: 'DELETE',
+                                headers: { Authorization: getToken() }
+                              })
+                              const errData = await res.json().catch(() => ({}))
+                              if (!res.ok) {
+                                window.alert(errData.error || 'Не удалось удалить')
+                                return
+                              }
+                              setVideos(videos.filter((x) => x.id !== v.id))
+                            }}
+                          >
+                            Удалить
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

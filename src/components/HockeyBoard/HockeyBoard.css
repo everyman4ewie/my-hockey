@@ -7,6 +7,12 @@
   border: 1px solid #e2e8f0;
 }
 
+/* Не даём flex-колонке (тактическая доска / видео) сжимать панель до нуля — иначе на мобильных инструменты «пропадают». */
+.hockey-board .board-toolbar,
+.hockey-board .board-toolbar-mobile-summary {
+  flex-shrink: 0;
+}
+
 .board-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -37,6 +43,39 @@
   color: #64748b;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+.board-toolbar-hint {
+  margin: 0;
+  padding: 0 0.25rem;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  font-weight: 400;
+  color: #64748b;
+  max-width: 16rem;
+  letter-spacing: 0.02em;
+}
+
+/* Над всей панелью инструментов, отдельной строкой */
+.board-toolbar-hint--top {
+  flex: 1 1 100%;
+  width: 100%;
+  max-width: none;
+  padding: 0 0 0.5rem;
+  margin: 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.board-toolbar-hint--mobile-summary {
+  font-size: 0.625rem;
+}
+
+.board-toolbar-mobile-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
 }
 
 .tool-buttons {
@@ -373,9 +412,9 @@
 
 .board-toolbar-mobile-summary {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   border-bottom: 1px solid #e2e8f0;
@@ -434,10 +473,8 @@
     gap: 0.75rem;
     padding: 0.75rem;
   }
-  .toolbar-hint {
-    width: 100%;
-    margin-left: 0;
-    margin-top: 0.25rem;
+  .board-toolbar-hint--top {
+    padding-bottom: 0.45rem;
   }
 }
 
@@ -486,4 +523,193 @@
     width: 16px;
     height: 16px;
   }
+
+  /* «Цифра на поле»: выпадающая сетка раскрывается влево (якорь справа у кнопки) */
+  .numbers-tool-menu {
+    left: auto;
+    right: 0;
+  }
+
+  /* Номер игрока: подпись сверху; «Убрать», затем поле ввода справа от кнопки */
+  .player-index-toolbar {
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .player-index-toolbar .toolbar-label {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  .player-index-toolbar .btn-player-index-clear {
+    flex: 0 0 auto;
+  }
+
+  .player-index-toolbar .player-index-input {
+    flex: 0 1 auto;
+    min-width: 2.5rem;
+  }
+}
+
+/* Видео (мобильная панель): карандаш + площадка в одной строке */
+.toolbar-mobile-video-appearance {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  flex-wrap: nowrap;
+  width: 100%;
+  flex: 1 1 100%;
+  box-sizing: border-box;
+}
+
+.toolbar-pencil-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.toolbar-pencil-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.toolbar-pencil-menu-trigger:hover {
+  border-color: #cbd5e1;
+}
+
+.toolbar-pencil-menu-trigger.is-open {
+  border-color: #0ea5e9;
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
+}
+
+.toolbar-pencil-menu-trigger--light {
+  border-color: #cbd5e1;
+}
+
+.toolbar-pencil-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 160;
+  min-width: 220px;
+  padding: 0.75rem 1rem 1rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.toolbar-pencil-stroke-slider {
+  width: 100%;
+  max-width: 220px;
+}
+
+.toolbar-right-mobile-video-icon {
+  margin-left: 0;
+  flex: 0 0 auto;
+}
+
+.hockey-board--mobile-video-toolbar .board-toolbar .toolbar-right-mobile-video-icon {
+  width: auto;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+}
+
+.hockey-board--mobile-video-toolbar .field-zone-trigger-label {
+  display: none;
+}
+
+.hockey-board--mobile-video-toolbar .field-zone-chevron {
+  display: none;
+}
+
+.hockey-board--mobile-video-toolbar .field-zone-trigger {
+  padding: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  min-width: 2.5rem;
+  justify-content: center;
+  gap: 0;
+}
+
+.hockey-board--mobile-video-toolbar .field-zone-select-wrap .field-zone-dropdown {
+  left: 0;
+  right: auto;
+  min-width: min(180px, calc(100vw - 1.5rem));
+  max-width: min(240px, calc(100vw - 1rem));
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.hockey-board--mobile-video-toolbar .field-zone-option {
+  padding: 0.38rem 0.55rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+
+.hockey-board--mobile-video-toolbar .field-zone-option svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hockey-board--mobile-video-toolbar .toolbar-mobile-video-appearance {
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.toolbar-mobile-video-clear-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  min-width: 2.5rem;
+  padding: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+/* Номер игрока в одной строке с иконками: справа от корзины — «Убрать», затем поле */
+.hockey-board--mobile-video-toolbar .toolbar-mobile-video-appearance .player-index-toolbar--mobile-video-inline {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+
+.hockey-board--mobile-video-toolbar .toolbar-mobile-video-appearance .player-index-toolbar--mobile-video-inline .btn-player-index-clear {
+  font-size: 0.72rem;
+  padding: 0.28rem 0.4rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.hockey-board--mobile-video-toolbar .toolbar-mobile-video-appearance .player-index-toolbar--mobile-video-inline .player-index-input {
+  width: 2.35rem;
+  min-width: 2.1rem;
+  max-width: 3.25rem;
+  padding: 0.22rem 0.35rem;
+  font-size: 0.8rem;
 }

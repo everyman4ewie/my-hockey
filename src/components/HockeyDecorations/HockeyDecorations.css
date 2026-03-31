@@ -10,9 +10,10 @@
   position: absolute;
   width: 60px;
   height: 24px;
-  background: rgba(2, 132, 199, 0.12);
+  background: linear-gradient(180deg, rgba(196, 30, 58, 0.15), rgba(10, 22, 40, 0.2));
   border-radius: 50%;
-  border: 1px solid rgba(2, 132, 199, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
 .hockey-puck-1 { top: 15%; left: 8%; --r: -15deg; animation: float 8s ease-in-out infinite; }
@@ -25,7 +26,7 @@
   position: absolute;
   width: 80px;
   height: 3px;
-  background: linear-gradient(90deg, transparent, rgba(2, 132, 199, 0.2), transparent);
+  background: linear-gradient(90deg, transparent, rgba(196, 30, 58, 0.35), rgba(255, 255, 255, 0.15), transparent);
   border-radius: 2px;
   transform-origin: left center;
 }
@@ -42,5 +43,5 @@
 @media (max-width: 768px) {
   .hockey-puck { width: 40px; height: 16px; }
   .hockey-stick { width: 50px; }
-  .hockey-puck-4, .hockey-puck-5 { opacity: 0.5; }
+  .hockey-puck-4, .hockey-puck-5 { opacity: 0.45; }
 }

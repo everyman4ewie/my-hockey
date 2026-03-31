@@ -17,14 +17,14 @@ function addPeriod(date, period) {
 }
 
 /**
- * Продлевает тариф Про и ставит дату следующего автосписания на конец оплаченного периода.
+ * Продлевает подписку (Про или Про+) и ставит дату следующего автосписания.
  */
-export function applyProSubscriptionSuccess(user, period, paymentMethodId) {
+export function applySubscriptionSuccess(user, period, paymentMethodId, tariffId = 'pro') {
   const now = new Date()
   const currentEnd = user.tariffExpiresAt ? new Date(user.tariffExpiresAt) : now
   const base = currentEnd > now ? currentEnd : now
   const newEnd = addPeriod(base, period)
-  user.tariff = 'pro'
+  user.tariff = tariffId === 'pro_plus' ? 'pro_plus' : 'pro'
   user.tariffExpiresAt = newEnd.toISOString()
   user.subscriptionPeriod = period
   user.subscriptionNextChargeAt = newEnd.toISOString()
@@ -36,6 +36,12 @@ export function applyProSubscriptionSuccess(user, period, paymentMethodId) {
   user.usage.pdfDownloads = 0
   user.usage.wordDownloads = 0
   user.usage.boardDownloads = 0
+  user.usage.tacticalVideoExports = 0
+}
+
+/** @deprecated используйте applySubscriptionSuccess */
+export function applyProSubscriptionSuccess(user, period, paymentMethodId) {
+  applySubscriptionSuccess(user, period, paymentMethodId, 'pro')
 }
 
 export function getYooKassaConfig() {
@@ -131,12 +137,13 @@ export function applySuccessfulYooKassaPayment({ payment, data, purchases }) {
 
   if (kind === 'subscription_first') {
     const period = meta.period === 'year' ? 'year' : 'month'
-    applyProSubscriptionSuccess(user, period, pmId)
+    const tariffId = meta.tariffId === 'pro_plus' ? 'pro_plus' : 'pro'
+    applySubscriptionSuccess(user, period, pmId, tariffId)
     user.subscriptionCancelledAt = null
     user.lastYooKassaPaymentIdApplied = pid
     purchases.push({
       userId,
-      tariffId: 'pro',
+      tariffId,
       period,
       at: new Date().toISOString(),
       yooKassaPaymentId: pid,
@@ -147,11 +154,12 @@ export function applySuccessfulYooKassaPayment({ payment, data, purchases }) {
 
   if (kind === 'subscription_renewal') {
     const period = user.subscriptionPeriod === 'year' ? 'year' : 'month'
-    applyProSubscriptionSuccess(user, period, pmId)
+    const renewTariff = user.tariff === 'pro_plus' ? 'pro_plus' : 'pro'
+    applySubscriptionSuccess(user, period, pmId, renewTariff)
     user.lastYooKassaPaymentIdApplied = pid
     purchases.push({
       userId,
-      tariffId: 'pro',
+      tariffId: renewTariff,
       period,
       at: new Date().toISOString(),
       yooKassaPaymentId: pid,
@@ -181,17 +189,18 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
     return client.getPayment(paymentId)
   }
 
-  async function createFirstSubscriptionPayment(userId, period) {
+  async function createFirstSubscriptionPayment(userId, period, tariffId = 'pro') {
     if (!client || !publicBase) {
       throw new Error('YooKassa: задайте YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY и PUBLIC_APP_URL')
     }
     const data = loadData()
     const payer = data.users.find((u) => u.id === userId)
-    const itemDesc = `Тариф Про (${period === 'year' ? '12 мес.' : '1 мес.'}), Hockey Tactics`
+    const tariff = getTariffById(tariffId)
+    const itemDesc = `Тариф ${tariff.name} (${period === 'year' ? '12 мес.' : '1 мес.'}), Hockey Tactics`
 
-    const tariff = getTariffById('pro')
     const amount = getSubscriptionAmountRub(tariff, period)
     const idem = randomUUID()
+    const tid = tariff.id === 'pro_plus' ? 'pro_plus' : 'pro'
     const body = {
       amount: { value: amount, currency: 'RUB' },
       capture: true,
@@ -200,10 +209,10 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
         type: 'redirect',
         return_url: `${publicBase}/payment/return`
       },
-      description: `Hockey Tactics — тариф Про (${period === 'year' ? 'год' : 'месяц'})`,
+      description: `Hockey Tactics — тариф ${tariff.name} (${period === 'year' ? 'год' : 'месяц'})`,
       metadata: {
         userId,
-        tariffId: 'pro',
+        tariffId: tid,
         period,
         kind: 'subscription_first'
       },
@@ -229,18 +238,20 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
     if (!pmId) throw new Error('Нет сохранённого способа оплаты')
 
     const period = user.subscriptionPeriod === 'year' ? 'year' : 'month'
-    const amount = getSubscriptionAmountRub(getTariffById('pro'), period)
+    const tariff = getTariffById(user.tariff === 'pro_plus' ? 'pro_plus' : 'pro')
+    const amount = getSubscriptionAmountRub(tariff, period)
     const idem = randomUUID()
+    const tid = user.tariff === 'pro_plus' ? 'pro_plus' : 'pro'
 
-    const itemDesc = `Продление тарифа Про (${period === 'year' ? '12 мес.' : '1 мес.'}), Hockey Tactics`
+    const itemDesc = `Продление тарифа ${tariff.name} (${period === 'year' ? '12 мес.' : '1 мес.'}), Hockey Tactics`
     const body = {
       amount: { value: amount, currency: 'RUB' },
       capture: true,
       payment_method_id: pmId,
-      description: `Hockey Tactics — продление Про (${period === 'year' ? 'год' : 'месяц'})`,
+      description: `Hockey Tactics — продление ${tariff.name} (${period === 'year' ? 'год' : 'месяц'})`,
       metadata: {
         userId: user.id,
-        tariffId: 'pro',
+        tariffId: tid,
         period,
         kind: 'subscription_renewal'
       },
@@ -287,7 +298,7 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
     const data = loadData()
     const now = Date.now()
     for (const user of data.users) {
-      if (user.tariff !== 'pro') continue
+      if (user.tariff !== 'pro' && user.tariff !== 'pro_plus') continue
       if (!user.yookassaPaymentMethodId) continue
       if (!user.subscriptionNextChargeAt) continue
       const next = new Date(user.subscriptionNextChargeAt).getTime()
@@ -297,7 +308,7 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
       try {
         const fresh = loadData()
         const u = fresh.users.find((x) => x.id === user.id)
-        if (!u || u.tariff !== 'pro' || !u.yookassaPaymentMethodId) continue
+        if (!u || (u.tariff !== 'pro' && u.tariff !== 'pro_plus') || !u.yookassaPaymentMethodId) continue
         if (!u.subscriptionNextChargeAt) continue
         if (new Date(u.subscriptionNextChargeAt).getTime() > Date.now()) continue
 

@@ -44,6 +44,35 @@
   font-size: 0.9rem;
 }
 
+/* Белая кнопка с красной обводкой; при hover — красная с белым текстом */
+.tactical-board-btn-video {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  text-decoration: none;
+  border-radius: 8px;
+  border: 2px solid #dc2626;
+  background: #fff;
+  color: #dc2626;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+.tactical-board-btn-video:hover {
+  background: #dc2626;
+  color: #fff;
+  border-color: #dc2626;
+}
+
+.tactical-board-btn-video:focus-visible {
+  outline: 2px solid #dc2626;
+  outline-offset: 2px;
+}
+
 .tactical-board-canvas-wrap {
   min-height: 0;
   min-width: 0;
@@ -109,7 +138,8 @@
   }
 
   .tactical-board-header-actions .btn-outline,
-  .tactical-board-header-actions .btn-primary {
+  .tactical-board-header-actions .btn-primary,
+  .tactical-board-header-actions .tactical-board-btn-video {
     padding: 0.45rem 0.75rem;
     font-size: 0.85rem;
   }

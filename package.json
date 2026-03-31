@@ -11,18 +11,22 @@
     "server": "node server/index.js",
     "server:fresh": "lsof -ti:3002 | xargs kill -9 2>/dev/null; node server/index.js",
     "start": "npm run build && node server/index.js",
-    "deploy:build": "bash scripts/deploy-production.sh"
+    "deploy:build": "bash scripts/deploy-production.sh",
+    "deploy:server": "bash scripts/rsync-to-server.sh"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "cors": "^2.8.5",
     "docx": "^9.6.1",
+    "dotenv": "^16.4.5",
     "express": "^4.18.2",
     "file-saver": "^2.0.5",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.577.0",
+    "multer": "^2.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0"

@@ -33,7 +33,7 @@ export default function PlanEdit() {
   const [limitModal, setLimitModal] = useState({ open: false, message: '' })
   const initialLoadDoneRef = useRef(false)
   const skipFirstSaveRef = useRef(true)
-  const limits = getTariffLimits(profile.tariff)
+  const limits = getTariffLimits(profile.effectiveTariff ?? profile.tariff)
   const maxExercises = limits.maxExercisesPerPlan >= 0 ? limits.maxExercisesPerPlan : Infinity
 
   const handleExerciseChange = useCallback((idx, newData) => {
