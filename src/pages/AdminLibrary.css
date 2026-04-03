@@ -1,0 +1,1011 @@
+/* Контент каталога внутри cabinet-main (AdminLibraryLayout) */
+.admin-library-layout-main .admin-library-page {
+  max-width: min(1180px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.admin-library-layout-main .admin-library-folder-page {
+  max-width: min(640px, 100%);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.admin-library-layout-main .admin-library-edit-page.admin-library-editor {
+  max-width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.admin-library-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+.admin-library-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.35rem;
+}
+
+.admin-library-header--catalog {
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.admin-library-title-block {
+  min-width: 0;
+}
+
+.admin-library-lead {
+  margin: 0.4rem 0 0;
+  max-width: 36rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.admin-library-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-library-title-row h1 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.admin-library-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-library-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  text-decoration: none;
+}
+
+.admin-library-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-library-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+  color: #0f172a;
+}
+
+.admin-library-table th,
+.admin-library-table td {
+  text-align: left;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+/* Как пункты меню кабинета (.cabinet-nav-item): не inherit — иначе тянется --text body на белом фоне */
+.admin-library-link-title {
+  font-weight: 400;
+  font-size: 0.95rem;
+  color: #0369a1;
+  text-decoration: none;
+}
+
+.admin-library-link-title:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+
+.admin-library-desc {
+  font-size: 0.85rem;
+  color: var(--muted, #64748b);
+  margin-top: 0.25rem;
+}
+
+.admin-library-row-actions {
+  white-space: nowrap;
+  display: flex;
+  gap: 0.35rem;
+}
+
+.admin-library-empty {
+  padding: 1rem;
+  color: var(--muted, #64748b);
+}
+
+.admin-library-edit-page .admin-library-edit-header {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.admin-library-edit-top {
+  width: 100%;
+}
+
+.admin-library-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+  color: inherit;
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+
+.admin-library-back:hover {
+  text-decoration: underline;
+}
+
+.admin-library-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: end;
+}
+
+.admin-library-meta-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+}
+
+.admin-library-meta-input {
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--border, #cbd5e1);
+  font: inherit;
+}
+
+.admin-library-meta-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}
+
+.admin-library-exercise-catalog-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+@media (max-width: 720px) {
+  .admin-library-exercise-catalog-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-library-exercise-block {
+  margin-bottom: 1rem;
+}
+
+/* .plan-layout — только строка «холст + заметки»; поля каталога и слои — снаружи (как в PlanCreate) */
+.admin-library-exercise-block .plan-layout {
+  margin-top: 0.5rem;
+}
+
+.admin-library-layer-toggle {
+  margin-bottom: 0.5rem;
+}
+
+.btn-sm {
+  font-size: 0.85rem;
+  padding: 0.35rem 0.65rem;
+}
+
+/* Тексты форм каталога (админ) — чёрные */
+.admin-library-edit-page .admin-library-meta-label,
+.admin-library-edit-page .admin-library-meta-check,
+.admin-library-edit-page .admin-library-back,
+.admin-library-folder-edit .admin-library-meta-label,
+.admin-library-folder-edit .admin-library-back,
+.admin-library-folder-page .admin-library-field-label,
+.admin-library-folder-page .admin-library-folder-page-title {
+  color: #0f172a;
+}
+
+.admin-library-meta-label--wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 640px) {
+  .admin-library-meta-label--wide {
+    grid-column: span 1;
+  }
+}
+
+.admin-library-folder-section {
+  margin-bottom: 1.25rem;
+  padding: 1.15rem 1.25rem 1.35rem;
+  background: #fff;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 14px;
+  box-shadow: 0 2px 16px rgba(15, 23, 42, 0.05);
+}
+
+.admin-library-folder-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem 1rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.admin-library-folder-head-main {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  min-width: 0;
+}
+
+.admin-library-folder-cover {
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e2e8f0);
+}
+
+.admin-library-folder-cover--placeholder {
+  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+}
+
+.admin-library-folder-title {
+  margin: 0 0 0.2rem;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.25;
+}
+
+.admin-library-folder-desc {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: var(--muted, #64748b);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.admin-library-folder-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.admin-library-folder-empty {
+  margin: 0;
+  padding: 1rem 0.75rem;
+  font-size: 0.88rem;
+  color: var(--muted, #64748b);
+  text-align: center;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px dashed #cbd5e1;
+}
+
+.admin-library-table tbody tr {
+  transition: background 0.12s ease;
+}
+
+.admin-library-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.admin-library-folder-image-block {
+  grid-column: 1 / -1;
+}
+
+/* Редактирование папки: одна колонка, карточка формы */
+.admin-library-folder-page {
+  padding: 1.25rem 1.25rem 2.5rem;
+  box-sizing: border-box;
+}
+
+.admin-library-folder-toolbar {
+  margin-bottom: 0.5rem;
+}
+
+.admin-library-folder-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: #475569;
+  text-decoration: none;
+}
+
+.admin-library-folder-back:hover {
+  color: #0f172a;
+  text-decoration: underline;
+}
+
+.admin-library-folder-page-title {
+  margin: 0.6rem 0 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.admin-library-folder-error {
+  margin: 0 0 1rem;
+}
+
+.admin-library-folder-card {
+  padding: 1.2rem 1.3rem 1.35rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 2px 18px rgba(15, 23, 42, 0.06);
+}
+
+.admin-library-folder-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem 1rem;
+  align-items: end;
+}
+
+.admin-library-folder-page .admin-library-field--full {
+  grid-column: 1 / -1;
+}
+
+.admin-library-folder-page .admin-library-field--order {
+  max-width: 6.5rem;
+}
+
+@media (max-width: 520px) {
+  .admin-library-folder-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-library-folder-page .admin-library-field--order {
+    max-width: none;
+  }
+}
+
+.admin-library-folder-image-panel {
+  margin-top: 1.2rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.admin-library-folder-image-lead {
+  margin: 0.3rem 0 0.65rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.admin-library-folder-actions {
+  margin-top: 1.35rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.admin-library-folder-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.2rem;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.admin-library-folder-image-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.admin-library-folder-thumb {
+  max-height: 80px;
+  max-width: 120px;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--border, #e2e8f0);
+}
+
+.admin-library-file-label {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-library-image-url {
+  width: 100%;
+  max-width: 100%;
+  resize: vertical;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ——— Редактор записи каталога (админ): сетка, тулбар, вкладки ——— */
+
+.admin-library-editor {
+  background: linear-gradient(180deg, #f1f5f9 0%, #f8fafc 32%, #f8fafc 100%);
+  min-height: 100vh;
+}
+
+.admin-library-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.25rem 1rem 1.5rem;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #e2e8f0;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+}
+
+.admin-library-toolbar-left {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.admin-library-toolbar-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.65rem;
+  margin: 0.15rem 0 0;
+  border-radius: 10px;
+  color: #475569;
+  text-decoration: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.admin-library-toolbar-back:hover {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+.admin-library-toolbar-titles {
+  min-width: 0;
+}
+
+.admin-library-toolbar-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.admin-library-toolbar-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.admin-library-toolbar-meta svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.admin-library-toolbar-sep {
+  color: #cbd5e1;
+}
+
+.admin-library-toolbar-preview-title {
+  color: #334155;
+  font-weight: 500;
+  max-width: 42rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-library-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.admin-library-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.25rem;
+  border-radius: 10px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.35);
+}
+
+.admin-library-error-banner {
+  margin: 0;
+}
+
+.admin-library-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 0.75rem 0 2.5rem;
+  box-sizing: border-box;
+  max-width: 100%;
+  margin: 0;
+  width: 100%;
+}
+
+.admin-library-editor-body > .admin-library-record-bar {
+  margin-left: 1.25rem;
+  margin-right: 1.25rem;
+}
+
+.admin-library-editor-body > .plan-error.admin-library-error-banner {
+  margin-left: 1.25rem;
+  margin-right: 1.25rem;
+}
+
+.admin-library-exercise-workspace > .admin-library-workspace-hint,
+.admin-library-exercise-workspace > .admin-library-tabs-wrap {
+  margin-left: 1.25rem;
+  margin-right: 1.25rem;
+}
+
+.admin-library-exercise-workspace > .admin-library-add-exercise {
+  margin-left: 1.25rem;
+  margin-right: 1.25rem;
+}
+
+.admin-library-record-bar {
+  padding: 0.75rem 1rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 14px rgba(15, 23, 42, 0.05);
+}
+
+.admin-library-record-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+  color: #0284c7;
+}
+
+.admin-library-record-bar-title {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+}
+
+.admin-library-record-bar-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.6rem 0.9rem;
+}
+
+.admin-library-field--inline {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.admin-library-field--inline .admin-library-field-control {
+  min-width: 8.5rem;
+}
+
+.admin-library-field--grow {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+
+.admin-library-field--narrow {
+  flex: 0 0 5.5rem;
+}
+
+.admin-library-field--narrow .admin-library-field-control {
+  text-align: center;
+}
+
+.admin-library-field-check--bar {
+  flex: 0 0 auto;
+  margin-bottom: 0.15rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.admin-library-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.admin-library-field-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.admin-library-field-control {
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  font: inherit;
+  font-size: 0.95rem;
+  color: #0f172a;
+  background: #fafbfc;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.admin-library-field-control:focus {
+  outline: none;
+  border-color: #38bdf8;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+
+.admin-library-field-textarea {
+  resize: vertical;
+  min-height: 4rem;
+  line-height: 1.45;
+}
+
+.admin-library-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+@media (max-width: 480px) {
+  .admin-library-field-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-library-field-check {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  color: #334155;
+  cursor: pointer;
+  user-select: none;
+}
+
+.admin-library-field-check input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: #0ea5e9;
+}
+
+.admin-library-exercise-workspace {
+  min-width: 0;
+  width: 100%;
+}
+
+.admin-library-workspace-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #64748b;
+  background: #f1f5f9;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.admin-library-workspace-hint svg {
+  flex-shrink: 0;
+  color: #0ea5e9;
+  opacity: 0.9;
+}
+
+.admin-library-workspace-hint--above-meta {
+  margin-bottom: 0.35rem;
+}
+
+.admin-library-tabs-wrap {
+  position: sticky;
+  top: 4.5rem;
+  z-index: 12;
+  margin: 0 0 1rem;
+  padding: 0.35rem 0;
+  background: linear-gradient(180deg, #f8fafc 0%, transparent 100%);
+}
+
+@media (max-width: 1100px) {
+  .admin-library-tabs-wrap {
+    top: 5.5rem;
+  }
+}
+
+.admin-library-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.05);
+}
+
+.admin-library-tab {
+  padding: 0.45rem 0.95rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.admin-library-tab:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.admin-library-tab--active {
+  background: linear-gradient(180deg, #0ea5e9 0%, #0284c7 100%);
+  color: #fff;
+  border-color: #0369a1;
+  box-shadow: 0 2px 12px rgba(14, 165, 233, 0.35);
+}
+
+.admin-library-exercise-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.admin-library-exercise-card {
+  scroll-margin-top: 6.5rem;
+  padding: 0;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(15, 23, 42, 0.06);
+}
+
+.admin-library-exercise-card-head {
+  padding: 1rem 1.25rem;
+  background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.admin-library-exercise-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.admin-library-exercise-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  height: 1.75rem;
+  padding: 0 0.45rem;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.admin-library-exercise-card-heading {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.admin-library-exercise-card-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.admin-library-exercise-card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1rem;
+  padding: 1rem 0 1.25rem;
+  box-sizing: border-box;
+}
+
+.admin-library-exercise-card-body > .admin-library-workspace-hint,
+.admin-library-exercise-card-body > .admin-library-exercise-meta {
+  padding-left: 1.15rem;
+  padding-right: 1.15rem;
+}
+
+/* Плитка + слои — полоса под подсказкой «Каждое упражнение…», на всю ширину карточки */
+.admin-library-exercise-meta {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.admin-library-exercise-meta .admin-library-mini-section {
+  flex: 1 1 240px;
+  min-width: min(100%, 220px);
+}
+
+/* Холст, инструменты и заметки — на всю ширину карточки / области контента */
+.admin-library-canvas-shell {
+  flex: 0 0 auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  overflow: hidden;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+  align-self: stretch;
+}
+
+@media (max-width: 1024px) {
+  .admin-library-canvas-shell {
+    border-radius: 0;
+  }
+}
+
+.admin-library-mini-section {
+  padding: 0.9rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.admin-library-mini-section--tools {
+  background: linear-gradient(180deg, #fffbeb 0%, #fff 100%);
+  border-color: #fde68a;
+}
+
+.admin-library-mini-section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.admin-library-mini-section--tools .admin-library-mini-section-head {
+  color: #b45309;
+}
+
+.admin-library-layer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  justify-content: center;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid #fcd34d;
+  background: #fff;
+  color: #92400e;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.admin-library-layer-btn:hover {
+  background: #fffbeb;
+  border-color: #fbbf24;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15);
+}
+
+.admin-library-layer-hint {
+  margin: 0.45rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.45;
+  color: #78716c;
+}
+
+.admin-library-plan-layout.plan-layout {
+  margin-top: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.admin-library-add-exercise {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding: 0.65rem 1.25rem;
+  border-radius: 12px;
+  border: 2px dashed #94a3b8;
+  background: transparent;
+  color: #475569;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.admin-library-add-exercise:hover {
+  border-color: #0ea5e9;
+  color: #0284c7;
+  background: rgba(14, 165, 233, 0.06);
+}
+
+/* Холст внутри карточки: убираем лишний внешний отступ у hockey-board */
+.admin-library-canvas-shell .hockey-board {
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+}

@@ -30,7 +30,10 @@ export default function PaymentReturn() {
       for (let i = 0; i < 15 && !cancelled; i++) {
         await new Promise((r) => setTimeout(r, 1500))
         try {
-          const res = await fetch('/api/user/profile', { headers: { Authorization: getToken() } })
+          const res = await fetch('/api/user/profile', {
+            credentials: 'include',
+            headers: { Authorization: getToken() }
+          })
           const data = await res.json().catch(() => ({}))
           if (cancelled) return
           if (data.tariff === 'pro' || data.tariff === 'pro_plus') {
@@ -64,6 +67,7 @@ export default function PaymentReturn() {
     const poll = async () => {
       try {
         const res = await fetch(`/api/payments/yookassa/status?paymentId=${encodeURIComponent(paymentId)}`, {
+          credentials: 'include',
           headers: { Authorization: getToken() }
         })
         const data = await res.json().catch(() => ({}))

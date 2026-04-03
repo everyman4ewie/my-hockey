@@ -2,6 +2,7 @@
  * Квоты и блокировки редактирования тактических видео в кабинете.
  */
 import { normalizeTariffIdForLimits } from './tariffs.js'
+import { sameEntityId } from './entityId.js'
 
 export const MAX_FREE_CABINET_VIDEOS = 3
 export const MAX_PRO_CABINET_VIDEOS_PER_MONTH = 10
@@ -18,7 +19,7 @@ function yearMonth(d) {
 }
 
 export function listUserVideos(data, userId) {
-  return (data.videos || []).filter((v) => v.userId === userId)
+  return (data.videos || []).filter((v) => sameEntityId(v.userId, userId))
 }
 
 export function countProVideosThisMonth(data, userId) {
@@ -69,17 +70,23 @@ export function canDeleteCabinetVideo(tariffId) {
   return { ok: true }
 }
 
-/** Скачивание MP4 (из кабинета и с страницы экспорта) — только Про+ и админ. */
+/** Скачивание файла видео (из кабинета и со страницы экспорта) — только Про+ и админ. */
 export function canDownloadTacticalVideoMp4(tariffId) {
   const t = normalizeTariffIdForLimits(tariffId)
   return t === 'pro_plus' || t === 'admin'
 }
 
-/** Можно ли создать новую запись в кабинете (POST) */
-export function canCreateCabinetVideo(tariffId, data, userId) {
-  if (userId === 'admin') return { ok: true }
+/**
+ * Можно ли создать новую запись в кабинете (POST).
+ * @param {object} [options.adminPreviewUsage] — виртуальный usage превью админа (без обхода лимитов).
+ */
+export function canCreateCabinetVideo(tariffId, data, userId, options = {}) {
+  const { adminPreviewUsage } = options
+  if (userId === 'admin' && !adminPreviewUsage) return { ok: true }
   const t = normalizeTariffIdForLimits(tariffId)
-  const all = listUserVideos(data, userId).length
+  const all = adminPreviewUsage
+    ? adminPreviewUsage.cabinetVideosTotal || 0
+    : listUserVideos(data, userId).length
   if (t === 'free') {
     if (all >= MAX_FREE_CABINET_VIDEOS) {
       return {
@@ -91,7 +98,9 @@ export function canCreateCabinetVideo(tariffId, data, userId) {
     return { ok: true }
   }
   if (t === 'pro') {
-    const n = countProVideosThisMonth(data, userId)
+    const n = adminPreviewUsage
+      ? adminPreviewUsage.videosCreatedThisMonth || 0
+      : countProVideosThisMonth(data, userId)
     if (n >= MAX_PRO_CABINET_VIDEOS_PER_MONTH) {
       return {
         ok: false,
@@ -141,6 +150,7 @@ export function videoPayloadForClient(video, tariffId) {
   const t = normalizeTariffIdForLimits(tariffId)
   const proCount = video.proEditCount || 0
   const readonly = isCabinetVideoReadonly(video, tariffId)
+  const fileExt = video.filename && /\.webm$/i.test(video.filename) ? 'webm' : 'mp4'
   return {
     id: video.id,
     title: video.title,
@@ -148,6 +158,7 @@ export function videoPayloadForClient(video, tariffId) {
     updatedAt: video.updatedAt,
     segmentSec: video.segmentSec,
     keyframes: video.keyframes || [],
+    fileExt,
     readonly,
     archived: isProPlusVideoArchived(video, tariffId),
     proEditCount: proCount,

@@ -1,0 +1,212 @@
+.library-page {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 2.5rem;
+}
+
+.library-folder-block {
+  margin-bottom: 2.25rem;
+}
+
+.library-folder-header {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+
+.library-folder-image {
+  width: 88px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--border, #e2e8f0);
+  flex-shrink: 0;
+}
+
+.library-folder-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: #0369a1;
+}
+
+.library-folder-desc {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--muted, #64748b);
+  line-height: 1.4;
+}
+
+.library-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  min-height: 40vh;
+  color: var(--muted, #64748b);
+}
+
+.library-loading-icon {
+  animation: library-spin 0.9s linear infinite;
+}
+
+@keyframes library-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.library-section-head {
+  margin-bottom: 1.75rem;
+}
+
+.library-back-row {
+  margin-bottom: 1rem;
+}
+
+.library-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.library-page-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #0c4a6e;
+}
+
+.library-title-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  color: #0c4a6e;
+}
+
+.library-title-row svg {
+  color: #0369a1;
+  flex-shrink: 0;
+}
+
+.library-sub {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--muted, #64748b);
+}
+
+.library-exercise-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+
+.library-exercise-tile {
+  border: 1px solid rgba(2, 132, 199, 0.2);
+  border-radius: 12px;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.95);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.library-exercise-tile__visual {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(145deg, #e0f2fe 0%, #f0f9ff 100%);
+  overflow: hidden;
+}
+
+.library-exercise-tile__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.library-exercise-tile__visual--locked .library-exercise-tile__img {
+  filter: blur(12px);
+  transform: scale(1.06);
+}
+
+.library-exercise-tile__placeholder {
+  width: 100%;
+  height: 100%;
+  min-height: 120px;
+  background: repeating-linear-gradient(
+    135deg,
+    #e2e8f0 0,
+    #e2e8f0 8px,
+    #f1f5f9 8px,
+    #f1f5f9 16px
+  );
+}
+
+.library-exercise-tile__lock-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.35);
+  pointer-events: none;
+}
+
+.library-exercise-tile__lock-icon {
+  color: #0369a1;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.15));
+}
+
+.library-exercise-tile__title {
+  margin: 0.75rem 1rem 0.35rem;
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: #0c4a6e;
+}
+
+.library-exercise-tile__count {
+  margin: 0 1rem 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #0369a1;
+}
+
+.library-exercise-tile__desc {
+  margin: 0 1rem 0.75rem;
+  font-size: 0.88rem;
+  color: var(--muted, #64748b);
+  line-height: 1.4;
+  flex: 1;
+}
+
+.library-exercise-tile__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0 1rem 1rem;
+}
+
+.library-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+}
+
+.library-btn--block {
+  width: 100%;
+  justify-content: center;
+}
+
+.library-empty {
+  text-align: center;
+  color: var(--muted, #64748b);
+  margin-top: 2rem;
+}

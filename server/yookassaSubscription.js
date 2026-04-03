@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
 import { createYooKassaClient, formatAmountRub } from './yookassaClient.js'
+import { sameEntityId } from './entityId.js'
 
 export function getSubscriptionAmountRub(tariff, period) {
   const raw = period === 'year' ? tariff.priceYear : tariff.priceMonth
@@ -33,6 +34,8 @@ export function applySubscriptionSuccess(user, period, paymentMethodId, tariffId
   }
   user.usage = user.usage || {}
   user.usage.plansCreated = 0
+  user.usage.plansCreatedThisMonth = 0
+  user.usage.plansMonthKey = undefined
   user.usage.pdfDownloads = 0
   user.usage.wordDownloads = 0
   user.usage.boardDownloads = 0
@@ -107,6 +110,15 @@ export function buildYooKassaReceipt({ amountStr, currency, description, custome
   return receipt
 }
 
+/** Сохраняем последние 4 цифры карты для ЛК (из ответа ЮKassa). */
+export function applyCardLast4FromPayment(user, payment) {
+  const pm = payment?.payment_method
+  const last4 = pm?.card?.last4 ?? pm?.card?.last_4
+  if (last4 != null && String(last4).length > 0) {
+    user.yookassaCardLast4 = String(last4).slice(-4)
+  }
+}
+
 /**
  * Обработка успешного платежа (первый или продление). Идемпотентность по id платежа ЮKassa.
  */
@@ -119,7 +131,7 @@ export function applySuccessfulYooKassaPayment({ payment, data, purchases }) {
   const kind = meta.kind || ''
   if (!userId) return { applied: false, reason: 'no_user_in_metadata' }
 
-  const user = data.users.find((u) => u.id === userId)
+  const user = data.users.find((u) => sameEntityId(u.id, userId))
   if (!user) return { applied: false, reason: 'user_not_found' }
 
   if (user.lastYooKassaPaymentIdApplied === pid) {
@@ -140,6 +152,9 @@ export function applySuccessfulYooKassaPayment({ payment, data, purchases }) {
     const tariffId = meta.tariffId === 'pro_plus' ? 'pro_plus' : 'pro'
     applySubscriptionSuccess(user, period, pmId, tariffId)
     user.subscriptionCancelledAt = null
+    user.subscriptionGraceUntil = null
+    user.subscriptionPaymentFailedAt = null
+    applyCardLast4FromPayment(user, payment)
     user.lastYooKassaPaymentIdApplied = pid
     purchases.push({
       userId,
@@ -156,6 +171,9 @@ export function applySuccessfulYooKassaPayment({ payment, data, purchases }) {
     const period = user.subscriptionPeriod === 'year' ? 'year' : 'month'
     const renewTariff = user.tariff === 'pro_plus' ? 'pro_plus' : 'pro'
     applySubscriptionSuccess(user, period, pmId, renewTariff)
+    user.subscriptionGraceUntil = null
+    user.subscriptionPaymentFailedAt = null
+    applyCardLast4FromPayment(user, payment)
     user.lastYooKassaPaymentIdApplied = pid
     purchases.push({
       userId,
@@ -194,7 +212,7 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
       throw new Error('YooKassa: задайте YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY и PUBLIC_APP_URL')
     }
     const data = loadData()
-    const payer = data.users.find((u) => u.id === userId)
+    const payer = data.users.find((u) => sameEntityId(u.id, userId))
     const tariff = getTariffById(tariffId)
     const itemDesc = `Тариф ${tariff.name} (${period === 'year' ? '12 мес.' : '1 мес.'}), Hockey Tactics`
 
@@ -274,6 +292,14 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
         purchases: data.purchases
       })
       saveData(data)
+    } else if (payment.status !== 'pending' && payment.status !== 'waiting_for_capture') {
+      const data = loadData()
+      const u = data.users.find((x) => sameEntityId(x.id, user.id))
+      if (u && (u.tariff === 'pro' || u.tariff === 'pro_plus') && u.yookassaPaymentMethodId) {
+        u.subscriptionPaymentFailedAt = new Date().toISOString()
+        u.subscriptionGraceUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+        saveData(data)
+      }
     }
 
     return payment
@@ -307,7 +333,7 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
       renewalLocks.add(user.id)
       try {
         const fresh = loadData()
-        const u = fresh.users.find((x) => x.id === user.id)
+        const u = fresh.users.find((x) => sameEntityId(x.id, user.id))
         if (!u || (u.tariff !== 'pro' && u.tariff !== 'pro_plus') || !u.yookassaPaymentMethodId) continue
         if (!u.subscriptionNextChargeAt) continue
         if (new Date(u.subscriptionNextChargeAt).getTime() > Date.now()) continue
@@ -315,6 +341,15 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
         await createRenewalPayment(u)
       } catch (e) {
         console.error('[YooKassa] renewal error', user.id, e.message || e)
+        try {
+          const fresh = loadData()
+          const u = fresh.users.find((x) => sameEntityId(x.id, user.id))
+          if (u && (u.tariff === 'pro' || u.tariff === 'pro_plus') && u.yookassaPaymentMethodId) {
+            u.subscriptionPaymentFailedAt = new Date().toISOString()
+            u.subscriptionGraceUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+            saveData(fresh)
+          }
+        } catch (_) {}
       } finally {
         renewalLocks.delete(user.id)
       }

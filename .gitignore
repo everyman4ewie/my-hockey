@@ -10,3 +10,5 @@ server/admin.json
 server/data.json.bak
 server/admin.json.bak
 server/uploads/
+public/ffmpeg/ffmpeg-core.js
+public/ffmpeg/ffmpeg-core.wasm

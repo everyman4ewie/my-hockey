@@ -1,12 +1,17 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { Home, ClipboardList, Activity, Users, Settings, FileText, Video } from 'lucide-react'
+import { useAdminViewAs, ADMIN_VIEW_AS_OPTIONS } from '../context/AdminViewAsContext'
+import { Home, ClipboardList, Activity, Users, Settings, FileText, Video, BookOpen } from 'lucide-react'
 import PageEditor from '../components/PageEditor/PageEditor'
 import HockeyDecorations from '../components/HockeyDecorations/HockeyDecorations'
-import { TARIFFS, getTariffById, getAdminAssignableTariffs } from '../constants/tariffs'
+import { TARIFFS, getTariffById, getAdminAssignableTariffs, normalizeTariffId } from '../constants/tariffs'
 import { LANDING_FEATURES_DEFAULTS } from '../constants/landingFeaturesDefaults'
+import { mergeSeo } from '../constants/seoDefaults'
 import { mergeEditorFeatures } from '../utils/mergeLandingFeatures'
+import { authFetch } from '../utils/authFetch'
+import { useAuthFetchOpts } from '../hooks/useAuthFetchOpts'
+import AdminSeoPanel from '../components/AdminSeoPanel/AdminSeoPanel'
 import './Cabinet.css'
 import './AdminCabinet.css'
 
@@ -14,13 +19,18 @@ function normalizePagesFromApi(data) {
   if (!data || typeof data !== 'object') return {}
   return {
     ...data,
-    features: mergeEditorFeatures(data.features, LANDING_FEATURES_DEFAULTS)
+    features: mergeEditorFeatures(data.features, LANDING_FEATURES_DEFAULTS),
+    seo: mergeSeo(data.seo)
   }
 }
 
 export default function AdminCabinet() {
   const { user, logout, getToken, updateUser } = useAuth()
+  const { viewAs, setViewAs, clearViewAs } = useAdminViewAs()
+  const authFetchOpts = useAuthFetchOpts()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const location = useLocation()
   const [section, setSection] = useState('siteStatus')
   const [plansFilter, setPlansFilter] = useState('all') // 'all' | 'boards' | 'plans'
   const [users, setUsers] = useState([])
@@ -48,21 +58,21 @@ export default function AdminCabinet() {
   const token = getToken()
 
   const loadUsers = useCallback(() => {
-    fetch('/api/admin/users', { headers: { Authorization: token } })
+    fetch('/api/admin/users', { credentials: 'include', headers: { Authorization: token } })
       .then(r => r.json())
       .then(setUsers)
       .catch(() => setUsers([]))
-  }, [token])
+  }, [token, authFetchOpts])
 
   const loadStats = useCallback(() => {
-    fetch('/api/admin/stats', { headers: { Authorization: token } })
+    fetch('/api/admin/stats', { credentials: 'include', headers: { Authorization: token } })
       .then(r => r.json())
       .then(setStats)
       .catch(() => setStats(null))
-  }, [token])
+  }, [token, authFetchOpts])
 
   const loadProfile = useCallback(() => {
-    fetch('/api/admin/profile', { headers: { Authorization: token } })
+    fetch('/api/admin/profile', { credentials: 'include', headers: { Authorization: token } })
       .then(r => r.json())
       .then(data => setProfile({
         login: data.login || '',
@@ -70,22 +80,22 @@ export default function AdminCabinet() {
         name: data.name || ''
       }))
       .catch(() => {})
-  }, [token])
+  }, [token, authFetchOpts])
 
   const loadPages = useCallback(() => {
-    fetch('/api/admin/pages', { headers: { Authorization: token } })
+    fetch('/api/admin/pages', { credentials: 'include', headers: { Authorization: token } })
       .then(r => r.json())
       .then(normalizePagesFromApi)
       .then(setPages)
       .catch(() => setPages({}))
-  }, [token])
+  }, [token, authFetchOpts])
 
   const loadPlans = useCallback(() => {
     setPlansLoading(true)
     Promise.all([
-      fetch('/api/user/plans', { headers: { Authorization: token } }).then(r => r.json()).catch(() => []),
-      fetch('/api/user/boards', { headers: { Authorization: token } }).then(r => r.json()).catch(() => []),
-      fetch('/api/user/videos', { headers: { Authorization: token } }).then(r => r.json()).catch(() => [])
+      authFetch('/api/user/plans', { ...authFetchOpts }).then(r => r.json()).catch(() => []),
+      authFetch('/api/user/boards', { ...authFetchOpts }).then(r => r.json()).catch(() => []),
+      authFetch('/api/user/videos', { ...authFetchOpts }).then(r => r.json()).catch(() => [])
     ])
       .then(([p, b, v]) => {
         setPlans(p)
@@ -93,21 +103,22 @@ export default function AdminCabinet() {
         setVideos(Array.isArray(v) ? v : [])
       })
       .finally(() => setPlansLoading(false))
-  }, [token])
+  }, [token, authFetchOpts])
 
   async function handleDownloadSavedVideo(v) {
     try {
-      const res = await fetch(`/api/user/videos/${v.id}/file`, { headers: { Authorization: token } })
+      const res = await authFetch(`/api/user/videos/${v.id}/file`, { ...authFetchOpts })
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
         throw new Error(errData.error || 'Не удалось скачать')
       }
       const blob = await res.blob()
       const safe = (v.title || 'video').replace(/[\\/:*?"<>|]/g, '').slice(0, 80) || 'video'
+      const ext = v.fileExt === 'webm' ? 'webm' : 'mp4'
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${safe}.mp4`
+      a.download = `${safe}.${ext}`
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
@@ -118,17 +129,28 @@ export default function AdminCabinet() {
   useEffect(() => {
     setLoading(true)
     Promise.all([
-      fetch('/api/admin/users', { headers: { Authorization: token } }).then(r => r.json()).then(setUsers).catch(() => setUsers([])),
-      fetch('/api/admin/stats', { headers: { Authorization: token } }).then(r => r.json()).then(setStats).catch(() => setStats(null)),
-      fetch('/api/admin/profile', { headers: { Authorization: token } }).then(r => r.json()).then(data => setProfile({
+      fetch('/api/admin/users', { credentials: 'include', headers: { Authorization: token } }).then(r => r.json()).then(setUsers).catch(() => setUsers([])),
+      fetch('/api/admin/stats', { credentials: 'include', headers: { Authorization: token } }).then(r => r.json()).then(setStats).catch(() => setStats(null)),
+      fetch('/api/admin/profile', { credentials: 'include', headers: { Authorization: token } }).then(r => r.json()).then(data => setProfile({
         login: data.login || '',
         email: data.email || '',
         name: data.name || ''
       })).catch(() => {}),
-      fetch('/api/admin/pages', { headers: { Authorization: token } }).then(r => r.json()).then(normalizePagesFromApi).then(setPages).catch(() => setPages({})),
-      fetch('/api/user/videos', { headers: { Authorization: token } }).then(r => r.json()).then(v => setVideos(Array.isArray(v) ? v : [])).catch(() => setVideos([]))
+      fetch('/api/admin/pages', { credentials: 'include', headers: { Authorization: token } }).then(r => r.json()).then(normalizePagesFromApi).then(setPages).catch(() => setPages({})),
+      authFetch('/api/user/videos', { ...authFetchOpts }).then(r => r.json()).then(v => setVideos(Array.isArray(v) ? v : [])).catch(() => setVideos([]))
     ]).finally(() => setLoading(false))
-  }, [token])
+  }, [token, authFetchOpts])
+
+  useEffect(() => {
+    const s = searchParams.get('section')
+    if (s && ['plans', 'videos', 'siteStatus', 'users', 'profile', 'pages'].includes(s)) {
+      setSection(s)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    if (section === 'plans' || section === 'videos') loadPlans()
+  }, [section, loadPlans])
 
   function handleLogout() {
     logout()
@@ -142,6 +164,7 @@ export default function AdminCabinet() {
     setProfileSaving(true)
     try {
       const res = await fetch('/api/admin/profile', {
+        credentials: 'include',
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify(profile)
@@ -168,6 +191,7 @@ export default function AdminCabinet() {
     setPasswordSaving(true)
     try {
       const res = await fetch('/api/admin/password', {
+        credentials: 'include',
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify({ oldPassword: passwordForm.oldPassword, newPassword: passwordForm.newPassword })
@@ -191,6 +215,7 @@ export default function AdminCabinet() {
     const toSave = {
       ...defaultPages,
       ...pages,
+      seo: mergeSeo(pages.seo),
       canvasBackgrounds: {
         ...defaultPages.canvasBackgrounds,
         ...(pages.canvasBackgrounds || {})
@@ -199,6 +224,7 @@ export default function AdminCabinet() {
     }
     try {
       const res = await fetch('/api/admin/pages', {
+        credentials: 'include',
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: token },
         body: JSON.stringify(toSave)
@@ -212,6 +238,48 @@ export default function AdminCabinet() {
       }
       setPagesSuccess('Страницы сохранены')
       setTimeout(() => setPagesSuccess(''), 3000)
+    } catch (err) {
+      setPagesSuccess('Ошибка: ' + err.message)
+    } finally {
+      setPagesSaving(false)
+    }
+  }
+
+  async function handleSeoSave(e) {
+    e.preventDefault()
+    setPagesSaving(true)
+    setPagesSuccess('')
+    const toSave = {
+      ...defaultPages,
+      ...pages,
+      seo: mergeSeo(pages.seo),
+      canvasBackgrounds: {
+        ...defaultPages.canvasBackgrounds,
+        ...(pages.canvasBackgrounds || {})
+      },
+      features: mergeEditorFeatures(pages.features, LANDING_FEATURES_DEFAULTS)
+    }
+    try {
+      const res = await fetch('/api/admin/pages', {
+        credentials: 'include',
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: token },
+        body: JSON.stringify(toSave)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Ошибка сохранения')
+      if (data.pages) setPages(normalizePagesFromApi(data.pages))
+      if (toSave.faviconUrl) {
+        let link = document.querySelector('link[rel="icon"]')
+        if (!link) {
+          link = document.createElement('link')
+          link.rel = 'icon'
+          document.head.appendChild(link)
+        }
+        link.href = toSave.faviconUrl
+      }
+      setPagesSuccess('SEO сохранён')
+      setTimeout(() => setPagesSuccess(''), 4000)
     } catch (err) {
       setPagesSuccess('Ошибка: ' + err.message)
     } finally {
@@ -266,7 +334,7 @@ export default function AdminCabinet() {
           <button
             type="button"
             className={`cabinet-nav-item ${section === 'plans' ? 'active' : ''}`}
-            onClick={() => { setSection('plans'); loadPlans(); }}
+            onClick={() => setSection('plans')}
           >
             <span className="cabinet-nav-icon"><ClipboardList size={20} /></span>
             План-конспекты
@@ -274,7 +342,7 @@ export default function AdminCabinet() {
           <button
             type="button"
             className={`cabinet-nav-item ${section === 'videos' ? 'active' : ''}`}
-            onClick={() => { setSection('videos'); loadPlans(); }}
+            onClick={() => setSection('videos')}
           >
             <span className="cabinet-nav-icon"><Video size={20} /></span>
             Мои видео
@@ -311,6 +379,13 @@ export default function AdminCabinet() {
             <span className="cabinet-nav-icon"><FileText size={20} /></span>
             Редактор страниц
           </button>
+          <Link
+            to="/admin/library"
+            className={`cabinet-nav-item${location.pathname.startsWith('/admin/library') ? ' active' : ''}`}
+          >
+            <span className="cabinet-nav-icon"><BookOpen size={20} /></span>
+            Каталог упражнений
+          </Link>
         </nav>
         <div className="cabinet-sidebar-footer">
           <button type="button" className="cabinet-logout" onClick={handleLogout}>
@@ -320,13 +395,48 @@ export default function AdminCabinet() {
       </aside>
 
       <div className="cabinet-content">
-        <header className="cabinet-header">
+        {viewAs != null && (
+          <div className="admin-view-as-banner" role="status">
+            <span>
+              Просмотр интерфейса:{' '}
+              <strong>{ADMIN_VIEW_AS_OPTIONS.find((o) => o.id === viewAs)?.label ?? String(viewAs)}</strong>
+              . API-запросы остаются с правами администратора.
+            </span>
+            <button type="button" className="btn-outline btn-sm" onClick={() => clearViewAs()}>
+              Сбросить превью
+            </button>
+          </div>
+        )}
+        <header className="cabinet-header cabinet-header--admin-tools">
           <div className="cabinet-user-info">
             <div className="cabinet-avatar-placeholder admin-avatar">A</div>
             <div>
               <h1>{profile.name || profile.login || user?.login || 'Администратор'}</h1>
               <p className="cabinet-email">{profile.email || user?.email}</p>
             </div>
+          </div>
+          <div className="admin-view-as-toolbar">
+            <label className="admin-view-as-label" htmlFor="admin-view-as-select">
+              Просмотр как
+            </label>
+            <select
+              id="admin-view-as-select"
+              className="admin-view-as-select"
+              value={viewAs === null || viewAs === undefined ? '' : viewAs}
+              onChange={(e) => {
+                const raw = e.target.value
+                setViewAs(raw === '' ? null : raw)
+              }}
+            >
+              {ADMIN_VIEW_AS_OPTIONS.map((o) => (
+                <option key={String(o.id)} value={o.id ?? ''}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <Link to="/cabinet" className="btn-outline btn-sm">
+              Кабинет пользователя
+            </Link>
           </div>
         </header>
 
@@ -404,9 +514,9 @@ export default function AdminCabinet() {
                             className="btn-delete"
                             onClick={async () => {
                               if (confirm('Удалить тактическую доску?')) {
-                                await fetch(`/api/boards/${b.id}`, {
-                                  method: 'DELETE',
-                                  headers: { Authorization: token }
+                                await authFetch(`/api/boards/${b.id}`, {
+                                  ...authFetchOpts,
+                                  method: 'DELETE'
                                 })
                                 setBoards(boards.filter(x => x.id !== b.id))
                               }
@@ -429,9 +539,9 @@ export default function AdminCabinet() {
                             className="btn-delete"
                             onClick={async () => {
                               if (confirm('Удалить план-конспект?')) {
-                                await fetch(`/api/plans/${p.id}`, {
-                                  method: 'DELETE',
-                                  headers: { Authorization: token }
+                                await authFetch(`/api/plans/${p.id}`, {
+                                  ...authFetchOpts,
+                                  method: 'DELETE'
                                 })
                                 setPlans(plans.filter(x => x.id !== p.id))
                               }
@@ -508,9 +618,9 @@ export default function AdminCabinet() {
                               className="btn-delete"
                               onClick={async () => {
                                 if (!window.confirm('Удалить это видео из кабинета?')) return
-                                const res = await fetch(`/api/user/videos/${v.id}`, {
-                                  method: 'DELETE',
-                                  headers: { Authorization: token }
+                                const res = await authFetch(`/api/user/videos/${v.id}`, {
+                                  ...authFetchOpts,
+                                  method: 'DELETE'
                                 })
                                 const errData = await res.json().catch(() => ({}))
                                 if (!res.ok) {
@@ -536,14 +646,14 @@ export default function AdminCabinet() {
                     <div>
                       <h2>Состояние сайта</h2>
                       <p className="admin-site-status-sub">
-                        Сводка пользователей, контента, тарифов и активности. Данные с сервера
+                        Ключевые цифры и активность. Данные с сервера
                         {stats?.generatedAt && (
                           <> · обновлено {new Date(stats.generatedAt).toLocaleString('ru')}</>
                         )}
                       </p>
                     </div>
                     <button type="button" className="btn-outline" onClick={() => loadStats()}>
-                      Обновить данные
+                      Обновить
                     </button>
                   </div>
 
@@ -551,186 +661,245 @@ export default function AdminCabinet() {
                     <p className="cabinet-loading">Загрузка статистики…</p>
                   ) : (
                     <>
-                      <div className="admin-kpi-grid">
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.totals?.users ?? stats.legacy?.totalUsers}</span>
-                          <span className="admin-stat-label">Пользователей</span>
-                        </div>
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.totals?.blockedUsers ?? 0}</span>
-                          <span className="admin-stat-label">Заблокировано</span>
-                        </div>
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.totals?.tariffSuspendedUsers ?? 0}</span>
-                          <span className="admin-stat-label">Тариф приостановлен</span>
-                        </div>
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.totals?.plans ?? stats.legacy?.totalPlans}</span>
-                          <span className="admin-stat-label">План-конспектов</span>
-                        </div>
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.totals?.boards ?? 0}</span>
-                          <span className="admin-stat-label">Тактических досок</span>
-                        </div>
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.totals?.videos ?? 0}</span>
-                          <span className="admin-stat-label">Видео в кабинетах</span>
-                        </div>
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.totals?.purchasesRecorded ?? 0}</span>
-                          <span className="admin-stat-label">Записей об оплатах</span>
-                        </div>
-                        <div className="admin-stat-card admin-kpi-card">
-                          <span className="admin-stat-value">{stats.subscriptions?.usersWithSavedCard ?? 0}</span>
-                          <span className="admin-stat-label">С сохранённой картой (ЮKassa)</span>
-                        </div>
-                      </div>
-
-                      <div className="admin-analytics-row">
-                        <div className="admin-panel">
-                          <h3>Вовлечённость</h3>
-                          <ul className="admin-metric-list">
-                            <li><span>Пользователей с хотя бы одним планом</span><strong>{stats.engagement?.usersWithAtLeastOnePlan ?? 0}</strong></li>
-                            <li><span>С хотя бы одной доской</span><strong>{stats.engagement?.usersWithAtLeastOneBoard ?? 0}</strong></li>
-                            <li><span>С хотя бы одним видео</span><strong>{stats.engagement?.usersWithAtLeastOneVideo ?? 0}</strong></li>
-                          </ul>
-                        </div>
-                        <div className="admin-panel">
-                          <h3>Средние на пользователя</h3>
-                          <ul className="admin-metric-list">
-                            <li><span>План-конспектов</span><strong>{stats.averages?.plansPerUser ?? '—'}</strong></li>
-                            <li><span>Досок</span><strong>{stats.averages?.boardsPerUser ?? '—'}</strong></li>
-                            <li><span>Видео</span><strong>{stats.averages?.videosPerUser ?? '—'}</strong></li>
-                          </ul>
-                        </div>
-                        <div className="admin-panel">
-                          <h3>Суммарное использование (лимиты)</h3>
-                          <ul className="admin-metric-list">
-                            <li><span>Счётчик планов (usage)</span><strong>{stats.usageTotals?.plansCreated ?? 0}</strong></li>
-                            <li><span>Скачиваний PDF</span><strong>{stats.usageTotals?.pdfDownloads ?? 0}</strong></li>
-                            <li><span>Скачиваний Word</span><strong>{stats.usageTotals?.wordDownloads ?? 0}</strong></li>
-                            <li><span>Скачиваний досок (PNG)</span><strong>{stats.usageTotals?.boardDownloads ?? 0}</strong></li>
-                          </ul>
-                        </div>
-                      </div>
-
-                      <div className="admin-panel admin-panel-tariffs">
-                        <h3>Распределение по тарифам</h3>
-                        <div className="admin-tariff-bars">
-                          {['free', 'pro', 'pro_plus', 'admin'].map((tid) => {
-                            const n = stats.tariffBreakdown?.[tid] ?? 0
-                            const label = getTariffById(tid).badge
-                            const max = Math.max(1, ...Object.values(stats.tariffBreakdown || {}))
-                            return (
-                              <div key={tid} className="admin-tariff-bar-row">
-                                <span className="admin-tariff-bar-name">{label}</span>
-                                <div className="admin-tariff-bar-track">
-                                  <div className="admin-tariff-bar-fill" style={{ width: `${(n / max) * 100}%` }} />
-                                </div>
-                                <span className="admin-tariff-bar-num">{n}</span>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-
-                      <div className="admin-panel">
-                        <h3>Сводка за периоды</h3>
-                        <div className="admin-period-sums">
-                          <div>
-                            <h4>За 7 дней</h4>
-                            <p>Регистраций: <strong>{stats.sumsLast7Days?.users ?? 0}</strong></p>
-                            <p>Новых планов: <strong>{stats.sumsLast7Days?.plans ?? 0}</strong></p>
-                            <p>Новых досок: <strong>{stats.sumsLast7Days?.boards ?? 0}</strong></p>
-                            <p>Новых видео: <strong>{stats.sumsLast7Days?.videos ?? 0}</strong></p>
+                      <section className="admin-dash-section" aria-labelledby="dash-summary-title">
+                        <h3 id="dash-summary-title" className="admin-dash-section-title">Сводка</h3>
+                        <div className="admin-kpi-grid admin-kpi-grid--compact">
+                          <div className="admin-stat-card admin-kpi-card">
+                            <span className="admin-stat-value">{stats.totals?.users ?? 0}</span>
+                            <span className="admin-stat-label">Пользователей</span>
                           </div>
-                          <div>
-                            <h4>За 30 дней</h4>
-                            <p>Регистраций: <strong>{stats.sumsLast30Days?.users ?? 0}</strong></p>
-                            <p>Новых планов: <strong>{stats.sumsLast30Days?.plans ?? 0}</strong></p>
-                            <p>Новых досок: <strong>{stats.sumsLast30Days?.boards ?? 0}</strong></p>
-                            <p>Новых видео: <strong>{stats.sumsLast30Days?.videos ?? 0}</strong></p>
+                          <div className="admin-stat-card admin-kpi-card">
+                            <span className="admin-stat-value">{stats.totals?.plans ?? 0}</span>
+                            <span className="admin-stat-label">План-конспектов</span>
+                          </div>
+                          <div className="admin-stat-card admin-kpi-card">
+                            <span className="admin-stat-value">{stats.totals?.boards ?? 0}</span>
+                            <span className="admin-stat-label">Тактических досок</span>
+                          </div>
+                          <div className="admin-stat-card admin-kpi-card">
+                            <span className="admin-stat-value">{stats.totals?.videos ?? 0}</span>
+                            <span className="admin-stat-label">Видео в кабинетах</span>
+                          </div>
+                          <div className="admin-stat-card admin-kpi-card admin-kpi-card--muted">
+                            <span className="admin-stat-value">{stats.totals?.blockedUsers ?? 0}</span>
+                            <span className="admin-stat-label">Заблокировано</span>
+                          </div>
+                          <div className="admin-stat-card admin-kpi-card admin-kpi-card--muted">
+                            <span className="admin-stat-value">{stats.totals?.tariffSuspendedUsers ?? 0}</span>
+                            <span className="admin-stat-label">Тариф приостановлен</span>
                           </div>
                         </div>
-                      </div>
-
-                      <div className="admin-chart-block admin-chart-activity">
-                        <h3>Активность по дням (7 дней)</h3>
-                        <p className="admin-chart-legend">
-                          <span className="lg-users">Регистрации</span>
-                          <span className="lg-plans">Планы</span>
-                          <span className="lg-boards">Доски</span>
-                          <span className="lg-videos">Видео</span>
+                        <p className="admin-dash-footnote">
+                          Подписки: картой ЮKassa — <strong>{stats.subscriptions?.usersWithSavedCard ?? 0}</strong>
+                          · записей оплат в базе — <strong>{stats.totals?.purchasesRecorded ?? 0}</strong>
                         </p>
-                        <div className="admin-chart admin-chart-multi">
-                          {stats.last7Days?.map((d, i) => {
-                            const max = Math.max(
-                              1,
-                              ...stats.last7Days.flatMap((x) => [x.users, x.plans, x.boards, x.videos])
-                            )
-                            return (
-                              <div key={i} className="admin-chart-bar-wrap admin-chart-day-cluster">
-                                <div className="admin-chart-day-bars">
-                                  <div
-                                    className="admin-chart-bar admin-bar-users"
-                                    style={{ height: `${Math.max(4, (d.users / max) * 100)}%` }}
-                                    title={`Регистрации: ${d.users}`}
-                                  />
-                                  <div
-                                    className="admin-chart-bar admin-bar-plans"
-                                    style={{ height: `${Math.max(4, (d.plans / max) * 100)}%` }}
-                                    title={`Планы: ${d.plans}`}
-                                  />
-                                  <div
-                                    className="admin-chart-bar admin-bar-boards"
-                                    style={{ height: `${Math.max(4, (d.boards / max) * 100)}%` }}
-                                    title={`Доски: ${d.boards}`}
-                                  />
-                                  <div
-                                    className="admin-chart-bar admin-bar-videos"
-                                    style={{ height: `${Math.max(4, (d.videos / max) * 100)}%` }}
-                                    title={`Видео: ${d.videos}`}
-                                  />
+                      </section>
+
+                      <section className="admin-dash-section" aria-labelledby="dash-devices-title">
+                        <h3 id="dash-devices-title" className="admin-dash-section-title">Устройства посетителей</h3>
+                        <p className="admin-dash-hint">
+                          Считается по одному визиту на сессию браузера (мобильный / планшет / компьютер). Помогает понять, на чём чаще открывают приложение.
+                        </p>
+                        {(stats.deviceStats?.total ?? 0) === 0 ? (
+                          <p className="admin-dash-empty">Пока нет данных — зайдите на сайт с разных устройств.</p>
+                        ) : (
+                          <div className="admin-device-bars">
+                            {[
+                              { key: 'mobile', label: 'Смартфоны', icon: 'М' },
+                              { key: 'tablet', label: 'Планшеты', icon: 'П' },
+                              { key: 'desktop', label: 'Компьютеры', icon: 'К' }
+                            ].map(({ key, label, icon }) => {
+                              const n = stats.deviceStats?.[key] ?? 0
+                              const pct = stats.deviceStats?.pct?.[key] ?? 0
+                              const max = Math.max(1, stats.deviceStats?.total ?? 1)
+                              return (
+                                <div key={key} className="admin-device-row">
+                                  <span className="admin-device-icon" aria-hidden>{icon}</span>
+                                  <div className="admin-device-body">
+                                    <div className="admin-device-label-row">
+                                      <span className="admin-device-label">{label}</span>
+                                      <span className="admin-device-num">{n} <span className="admin-device-pct">({pct}%)</span></span>
+                                    </div>
+                                    <div className="admin-tariff-bar-track admin-device-track">
+                                      <div
+                                        className="admin-tariff-bar-fill admin-device-fill"
+                                        style={{ width: `${(n / max) * 100}%` }}
+                                      />
+                                    </div>
+                                  </div>
                                 </div>
-                                <span className="admin-chart-label">{new Date(d.date).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}</span>
-                              </div>
-                            )
-                          })}
+                              )
+                            })}
+                          </div>
+                        )}
+                        <div className="admin-device-user-log">
+                          <h4 className="admin-panel-subtitle">Кто с какого устройства и IP (последние записи)</h4>
+                          <p className="admin-dash-footnote admin-device-user-log-note">
+                            Пишется для авторизованных визитов (один раз за сессию вкладки). Гости в журнал не попадают.
+                          </p>
+                          {stats.deviceUserLog?.length ? (
+                            <div className="admin-table-scroll admin-table-scroll--device-log">
+                              <table className="admin-mini-table admin-mini-table--readable">
+                                <thead>
+                                  <tr>
+                                    <th>Время</th>
+                                    <th>Пользователь</th>
+                                    <th>Устройство</th>
+                                    <th>IP</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {stats.deviceUserLog.map((row, i) => (
+                                    <tr key={`${row.at}-${row.userId}-${i}`}>
+                                      <td>{new Date(row.at).toLocaleString('ru')}</td>
+                                      <td>{row.login}</td>
+                                      <td>
+                                        {row.category === 'mobile'
+                                          ? 'Смартфон'
+                                          : row.category === 'tablet'
+                                            ? 'Планшет'
+                                            : 'Компьютер'}
+                                      </td>
+                                      <td className="admin-ip-cell">{row.ip}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <p className="admin-dash-empty">Пока нет записей — зайдите под пользователем с телефона или ПК.</p>
+                          )}
                         </div>
-                      </div>
+                      </section>
 
-                      <div className="admin-panel">
-                        <h3>Активность по дням (30 дней)</h3>
-                        <div className="admin-table-scroll">
-                          <table className="admin-analytics-table">
-                            <thead>
-                              <tr>
-                                <th>Дата</th>
-                                <th>Регистрации</th>
-                                <th>Планы</th>
-                                <th>Доски</th>
-                                <th>Видео</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {stats.last30Days?.map((d) => (
-                                <tr key={d.date}>
-                                  <td>{new Date(d.date).toLocaleDateString('ru')}</td>
-                                  <td>{d.users}</td>
-                                  <td>{d.plans}</td>
-                                  <td>{d.boards}</td>
-                                  <td>{d.videos}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                      <section className="admin-dash-section" aria-labelledby="dash-tariffs-title">
+                        <h3 id="dash-tariffs-title" className="admin-dash-section-title">Тарифы по пользователям</h3>
+                        <div className="admin-panel admin-panel-tariffs admin-panel--elevated">
+                          <div className="admin-tariff-bars">
+                            {['free', 'pro', 'pro_plus', 'admin'].map((tid) => {
+                              const n = stats.tariffBreakdown?.[tid] ?? 0
+                              const label = getTariffById(tid).badge
+                              const max = Math.max(1, ...Object.values(stats.tariffBreakdown || {}))
+                              return (
+                                <div key={tid} className="admin-tariff-bar-row">
+                                  <span className="admin-tariff-bar-name">{label}</span>
+                                  <div className="admin-tariff-bar-track">
+                                    <div className="admin-tariff-bar-fill" style={{ width: `${(n / max) * 100}%` }} />
+                                  </div>
+                                  <span className="admin-tariff-bar-num">{n}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      </section>
 
-                      <div className="admin-top-users-grid">
-                        <div className="admin-panel">
-                          <h3>Топ по план-конспектам</h3>
-                          <table className="admin-mini-table">
+                      <section className="admin-dash-section" aria-labelledby="dash-engagement-title">
+                        <h3 id="dash-engagement-title" className="admin-dash-section-title">Активность и вовлечённость</h3>
+                        <div className="admin-analytics-row admin-analytics-row--two">
+                          <div className="admin-panel admin-panel--elevated">
+                            <h4 className="admin-panel-subtitle">Пользователи с контентом</h4>
+                            <ul className="admin-metric-list">
+                              <li><span>С план-конспектом</span><strong>{stats.engagement?.usersWithAtLeastOnePlan ?? 0}</strong></li>
+                              <li><span>С тактической доской</span><strong>{stats.engagement?.usersWithAtLeastOneBoard ?? 0}</strong></li>
+                              <li><span>С видео в кабинете</span><strong>{stats.engagement?.usersWithAtLeastOneVideo ?? 0}</strong></li>
+                            </ul>
+                          </div>
+                          <div className="admin-panel admin-panel--elevated">
+                            <h4 className="admin-panel-subtitle">Среднее на пользователя</h4>
+                            <ul className="admin-metric-list">
+                              <li><span>План-конспектов</span><strong>{stats.averages?.plansPerUser ?? '—'}</strong></li>
+                              <li><span>Досок</span><strong>{stats.averages?.boardsPerUser ?? '—'}</strong></li>
+                              <li><span>Видео</span><strong>{stats.averages?.videosPerUser ?? '—'}</strong></li>
+                            </ul>
+                          </div>
+                        </div>
+                        <div className="admin-panel admin-panel--elevated admin-panel--usage">
+                          <h4 className="admin-panel-subtitle">Суммарные скачивания и счётчики (по пользователям)</h4>
+                          <ul className="admin-metric-list admin-metric-list--inline">
+                            <li><span>PDF</span><strong>{stats.usageTotals?.pdfDownloads ?? 0}</strong></li>
+                            <li><span>Word</span><strong>{stats.usageTotals?.wordDownloads ?? 0}</strong></li>
+                            <li><span>PNG досок</span><strong>{stats.usageTotals?.boardDownloads ?? 0}</strong></li>
+                            <li><span>Планов (счётчик)</span><strong>{stats.usageTotals?.plansCreated ?? 0}</strong></li>
+                          </ul>
+                        </div>
+                      </section>
+
+                      <section className="admin-dash-section" aria-labelledby="dash-periods-title">
+                        <h3 id="dash-periods-title" className="admin-dash-section-title">Новые регистрации и контент</h3>
+                        <div className="admin-period-cards">
+                          <div className="admin-period-card">
+                            <div className="admin-period-card-title">7 дней</div>
+                            <ul className="admin-period-card-list">
+                              <li>Регистрации — <strong>{stats.sumsLast7Days?.users ?? 0}</strong></li>
+                              <li>Планы — <strong>{stats.sumsLast7Days?.plans ?? 0}</strong></li>
+                              <li>Доски — <strong>{stats.sumsLast7Days?.boards ?? 0}</strong></li>
+                              <li>Видео — <strong>{stats.sumsLast7Days?.videos ?? 0}</strong></li>
+                            </ul>
+                          </div>
+                          <div className="admin-period-card">
+                            <div className="admin-period-card-title">30 дней</div>
+                            <ul className="admin-period-card-list">
+                              <li>Регистрации — <strong>{stats.sumsLast30Days?.users ?? 0}</strong></li>
+                              <li>Планы — <strong>{stats.sumsLast30Days?.plans ?? 0}</strong></li>
+                              <li>Доски — <strong>{stats.sumsLast30Days?.boards ?? 0}</strong></li>
+                              <li>Видео — <strong>{stats.sumsLast30Days?.videos ?? 0}</strong></li>
+                            </ul>
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="admin-dash-section" aria-labelledby="dash-chart-title">
+                        <h3 id="dash-chart-title" className="admin-dash-section-title">График за 7 дней</h3>
+                        <div className="admin-chart-block admin-chart-activity admin-panel--elevated">
+                          <p className="admin-chart-legend">
+                            <span className="lg-users">Регистрации</span>
+                            <span className="lg-plans">Планы</span>
+                            <span className="lg-boards">Доски</span>
+                            <span className="lg-videos">Видео</span>
+                          </p>
+                          <div className="admin-chart admin-chart-multi">
+                            {stats.last7Days?.map((d, i) => {
+                              const max = Math.max(
+                                1,
+                                ...stats.last7Days.flatMap((x) => [x.users, x.plans, x.boards, x.videos])
+                              )
+                              return (
+                                <div key={i} className="admin-chart-bar-wrap admin-chart-day-cluster">
+                                  <div className="admin-chart-day-bars">
+                                    <div
+                                      className="admin-chart-bar admin-bar-users"
+                                      style={{ height: `${Math.max(4, (d.users / max) * 100)}%` }}
+                                      title={`Регистрации: ${d.users}`}
+                                    />
+                                    <div
+                                      className="admin-chart-bar admin-bar-plans"
+                                      style={{ height: `${Math.max(4, (d.plans / max) * 100)}%` }}
+                                      title={`Планы: ${d.plans}`}
+                                    />
+                                    <div
+                                      className="admin-chart-bar admin-bar-boards"
+                                      style={{ height: `${Math.max(4, (d.boards / max) * 100)}%` }}
+                                      title={`Доски: ${d.boards}`}
+                                    />
+                                    <div
+                                      className="admin-chart-bar admin-bar-videos"
+                                      style={{ height: `${Math.max(4, (d.videos / max) * 100)}%` }}
+                                      title={`Видео: ${d.videos}`}
+                                    />
+                                  </div>
+                                  <span className="admin-chart-label">{new Date(d.date).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}</span>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="admin-dash-section" aria-labelledby="dash-top-title">
+                        <h3 id="dash-top-title" className="admin-dash-section-title">Топ по план-конспектам</h3>
+                        <div className="admin-panel admin-panel--elevated admin-top-plans-panel">
+                          <table className="admin-mini-table admin-mini-table--readable">
                             <thead>
                               <tr><th>#</th><th>Пользователь</th><th>Шт.</th></tr>
                             </thead>
@@ -747,115 +916,49 @@ export default function AdminCabinet() {
                             </tbody>
                           </table>
                         </div>
-                        <div className="admin-panel">
-                          <h3>Топ по доскам</h3>
-                          <table className="admin-mini-table">
-                            <thead>
-                              <tr><th>#</th><th>Пользователь</th><th>Шт.</th></tr>
-                            </thead>
-                            <tbody>
-                              {stats.topUsersByBoards?.length ? stats.topUsersByBoards.map((u, i) => (
-                                <tr key={u.userId}>
-                                  <td>{i + 1}</td>
-                                  <td>{u.login}</td>
-                                  <td>{u.count}</td>
-                                </tr>
-                              )) : (
-                                <tr><td colSpan={3} className="admin-table-empty">Нет данных</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                        <div className="admin-panel">
-                          <h3>Топ по видео</h3>
-                          <table className="admin-mini-table">
-                            <thead>
-                              <tr><th>#</th><th>Пользователь</th><th>Шт.</th></tr>
-                            </thead>
-                            <tbody>
-                              {stats.topUsersByVideos?.length ? stats.topUsersByVideos.map((u, i) => (
-                                <tr key={u.userId}>
-                                  <td>{i + 1}</td>
-                                  <td>{u.login}</td>
-                                  <td>{u.count}</td>
-                                </tr>
-                              )) : (
-                                <tr><td colSpan={3} className="admin-table-empty">Нет данных</td></tr>
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
+                      </section>
 
-                      <div className="admin-recent-grid">
-                        <div className="admin-panel">
-                          <h3>Последние регистрации</h3>
-                          {stats.recentUsers?.length ? (
-                            <ul className="admin-recent-list">
-                              {stats.recentUsers.map((u) => (
-                                <li key={u.id}>
-                                  <span className="admin-recent-login">{u.login}</span>
-                                  <span className="admin-recent-meta">{u.email}</span>
-                                  <span className="admin-recent-meta">{new Date(u.createdAt).toLocaleString('ru')}</span>
-                                  <span className="admin-tariff-badge admin-tariff-badge-inline">{getTariffById(u.tariff || 'free').badge}</span>
-                                  {u.blocked && <span className="admin-user-blocked-badge">Заблок.</span>}
-                                  {u.tariffSuspended && <span className="admin-tariff-suspended-tag">тариф</span>}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="cabinet-muted">Нет пользователей</p>
-                          )}
+                      <section className="admin-dash-section" aria-labelledby="dash-recent-title">
+                        <h3 id="dash-recent-title" className="admin-dash-section-title">Недавно</h3>
+                        <div className="admin-recent-grid admin-recent-grid--two">
+                          <div className="admin-panel admin-panel--elevated">
+                            <h4 className="admin-panel-subtitle">Регистрации</h4>
+                            {stats.recentUsers?.length ? (
+                              <ul className="admin-recent-list">
+                                {stats.recentUsers.map((u) => (
+                                  <li key={u.id}>
+                                    <span className="admin-recent-login">{u.login}</span>
+                                    <span className="admin-recent-meta">{new Date(u.createdAt).toLocaleString('ru')}</span>
+                                    <span className="admin-tariff-badge admin-tariff-badge-inline">{getTariffById(u.tariff || 'free').badge}</span>
+                                    {u.blocked && <span className="admin-user-blocked-badge">Заблок.</span>}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="cabinet-muted">Нет данных</p>
+                            )}
+                          </div>
+                          <div className="admin-panel admin-panel--elevated">
+                            <h4 className="admin-panel-subtitle">Последние планы, доски и видео</h4>
+                            {stats.recentActivity?.length ? (
+                              <ul className="admin-recent-list admin-recent-list--activity">
+                                {stats.recentActivity.map((row) => (
+                                  <li key={`${row.kind}-${row.id}`}>
+                                    <span className={`admin-activity-kind admin-activity-kind--${row.kind}`}>
+                                      {row.kind === 'plan' ? 'План' : row.kind === 'board' ? 'Доска' : 'Видео'}
+                                    </span>
+                                    <span className="admin-recent-title">{row.label}</span>
+                                    <span className="admin-recent-meta">{row.login}</span>
+                                    <span className="admin-recent-meta">{new Date(row.createdAt).toLocaleString('ru')}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="cabinet-muted">Нет данных</p>
+                            )}
+                          </div>
                         </div>
-                        <div className="admin-panel">
-                          <h3>Последние план-конспекты</h3>
-                          {stats.recentPlans?.length ? (
-                            <ul className="admin-recent-list">
-                              {stats.recentPlans.map((p) => (
-                                <li key={p.id}>
-                                  <span className="admin-recent-title">{p.title}</span>
-                                  <span className="admin-recent-meta">{p.login}</span>
-                                  <span className="admin-recent-meta">{new Date(p.createdAt).toLocaleString('ru')}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="cabinet-muted">Нет планов</p>
-                          )}
-                        </div>
-                        <div className="admin-panel">
-                          <h3>Последние доски</h3>
-                          {stats.recentBoards?.length ? (
-                            <ul className="admin-recent-list">
-                              {stats.recentBoards.map((b) => (
-                                <li key={b.id}>
-                                  <span className="admin-recent-title">Доска {b.id}</span>
-                                  <span className="admin-recent-meta">{b.login}</span>
-                                  <span className="admin-recent-meta">{new Date(b.createdAt).toLocaleString('ru')}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="cabinet-muted">Нет досок</p>
-                          )}
-                        </div>
-                        <div className="admin-panel">
-                          <h3>Последние видео</h3>
-                          {stats.recentVideos?.length ? (
-                            <ul className="admin-recent-list">
-                              {stats.recentVideos.map((v) => (
-                                <li key={v.id}>
-                                  <span className="admin-recent-title">{v.title}</span>
-                                  <span className="admin-recent-meta">{v.login}</span>
-                                  <span className="admin-recent-meta">{new Date(v.createdAt).toLocaleString('ru')}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="cabinet-muted">Нет видео</p>
-                          )}
-                        </div>
-                      </div>
+                      </section>
                     </>
                   )}
                 </div>
@@ -875,6 +978,7 @@ export default function AdminCabinet() {
                             <th>Email</th>
                             <th>Тариф</th>
                             <th>Статус</th>
+                            <th>Редактор каталога</th>
                             <th className="admin-users-actions-col">Действия</th>
                           </tr>
                         </thead>
@@ -900,12 +1004,39 @@ export default function AdminCabinet() {
                                 )}
                               </td>
                               <td>
+                                <label className="admin-editor-toggle">
+                                  <input
+                                    type="checkbox"
+                                    checked={!!u.isEditor}
+                                    disabled={u.blocked}
+                                    title={u.blocked ? 'Сначала разблокируйте пользователя' : 'Редактирование каталога упражнений'}
+                                    onChange={async (e) => {
+                                      try {
+                                        const res = await fetch(`/api/admin/users/${u.id}/editor`, {
+                                          credentials: 'include',
+                                          method: 'PUT',
+                                          headers: { 'Content-Type': 'application/json', Authorization: token },
+                                          body: JSON.stringify({ isEditor: e.target.checked })
+                                        })
+                                        const d = await res.json().catch(() => ({}))
+                                        if (!res.ok) throw new Error(d.error || 'Ошибка')
+                                        setUsers((prev) =>
+                                          prev.map((x) => (x.id === u.id ? { ...x, isEditor: d.isEditor } : x))
+                                        )
+                                      } catch (err) {
+                                        window.alert(err.message || 'Ошибка')
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </td>
+                              <td>
                                 <div className="admin-user-actions">
                                 <button
                                   type="button"
                                   className="btn-outline btn-sm"
                                   onClick={() => {
-                          const tid = getTariffById(u.tariff || 'free').id
+                          const tid = normalizeTariffId(u.tariff)
                           setAssignUser(u)
                           setAssignTariffId(tid === 'free' ? 'pro' : tid)
                           setAssignExpiresAt(u.tariffExpiresAt ? u.tariffExpiresAt.slice(0, 10) : '')
@@ -924,6 +1055,7 @@ export default function AdminCabinet() {
                                     }
                                     try {
                                       const res = await fetch(`/api/admin/users/${u.id}/block`, {
+                                        credentials: 'include',
                                         method: 'PUT',
                                         headers: { 'Content-Type': 'application/json', Authorization: token },
                                         body: JSON.stringify({ blocked: !u.blocked })
@@ -951,6 +1083,7 @@ export default function AdminCabinet() {
                                     }
                                     try {
                                       const res = await fetch(`/api/admin/users/${u.id}/tariff-suspension`, {
+                                        credentials: 'include',
                                         method: 'PUT',
                                         headers: { 'Content-Type': 'application/json', Authorization: token },
                                         body: JSON.stringify({ suspended: !u.tariffSuspended })
@@ -1028,13 +1161,20 @@ export default function AdminCabinet() {
                             let exp = assignExpiresAt.trim() || null
                             if (exp && /^\d{4}-\d{2}-\d{2}$/.test(exp)) exp = `${exp}T23:59:59.000Z`
                             const res = await fetch(`/api/admin/users/${assignUser.id}/tariff`, {
+                              credentials: 'include',
                               method: 'PUT',
                               headers: { 'Content-Type': 'application/json', Authorization: token },
                               body: JSON.stringify({ tariffId: assignTariffId, expiresAt: exp })
                             })
                             const data = await res.json().catch(() => ({}))
                             if (!res.ok) throw new Error(data.error || 'Ошибка')
-                            setUsers(users.map(u => u.id === assignUser.id ? { ...u, tariff: assignTariffId, tariffExpiresAt: data.tariffExpiresAt ?? exp } : u))
+                            setUsers((prev) =>
+                              prev.map((u) =>
+                                u.id === assignUser.id
+                                  ? { ...u, tariff: assignTariffId, tariffExpiresAt: data.tariffExpiresAt ?? exp }
+                                  : u
+                              )
+                            )
                             setAssignUser(null)
                             setAssignExpiresAt('')
                           } catch (err) {
@@ -1142,6 +1282,16 @@ export default function AdminCabinet() {
                     saving={pagesSaving}
                     success={pagesSuccess}
                   />
+                  <div className="admin-pages-seo-block">
+                    <h3 className="admin-dash-section-title">SEO</h3>
+                    <AdminSeoPanel
+                      seo={pages.seo}
+                      onSeoChange={(nextSeo) => setPages((p) => ({ ...p, seo: mergeSeo(nextSeo) }))}
+                      onSubmit={handleSeoSave}
+                      saving={pagesSaving}
+                      message={pagesSuccess}
+                    />
+                  </div>
                 </div>
               )}
             </>

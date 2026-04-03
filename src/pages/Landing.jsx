@@ -5,7 +5,9 @@ import { Target, FileText, Download, Award, Zap, Shield, Menu, User, X, LogIn, V
 import HockeyDecorations from '../components/HockeyDecorations/HockeyDecorations'
 import { TARIFFS } from '../constants/tariffs'
 import { LANDING_FEATURES_DEFAULTS } from '../constants/landingFeaturesDefaults'
+import { mergeSeo } from '../constants/seoDefaults'
 import { mergeLandingFeatures } from '../utils/mergeLandingFeatures'
+import { applySeoToDocument } from '../utils/applySeoToDocument'
 import './Landing.css'
 
 const LANDING_TARIFF_IDS = ['free', 'pro', 'pro_plus']
@@ -77,17 +79,27 @@ export default function Landing() {
   const [billingPeriod, setBillingPeriod] = useState('year')
 
   useEffect(() => {
-    fetch('/api/pages/landing')
-      .then(r => r.json())
+    fetch('/api/pages/landing', { credentials: 'include' })
+      .then((r) => r.json())
       .then((data) => {
         setPages(() => {
           const merged = { ...defaultPages, ...data }
           merged.features = mergeLandingFeatures(data.features, LANDING_FEATURES_DEFAULTS)
+          merged.seo = mergeSeo(data.seo)
           return merged
         })
       })
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    applySeoToDocument(mergeSeo(pages.seo), {
+      siteName: pages.siteName,
+      heroTitle: pages.heroTitle,
+      aboutLead: pages.aboutLead,
+      logoUrl: pages.logoUrl
+    })
+  }, [pages])
 
   return (
     <div className="landing landing-ice">

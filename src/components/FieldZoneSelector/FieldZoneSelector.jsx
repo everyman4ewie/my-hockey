@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { ChevronDown, Check } from 'lucide-react'
+import { ChevronDown, Check, Lock } from 'lucide-react'
+import { isFieldZoneLockedForTariff, FIELD_ZONE_UPGRADE_TOOLTIP } from '../../constants/fieldZones'
 import './FieldZoneSelector.css'
 
 export const FIELD_OPTIONS = [
@@ -16,7 +17,7 @@ export const FIELD_OPTIONS = [
   { id: 'clean', label: 'Чистый фон' }
 ]
 
-export default function FieldZoneSelector({ value = 'full', onChange }) {
+export default function FieldZoneSelector({ value = 'full', onChange, effectiveTariff }) {
   const ref = useRef(null)
   const [open, setOpen] = useState(false)
 
@@ -43,17 +44,28 @@ export default function FieldZoneSelector({ value = 'full', onChange }) {
           className="field-zone-dropdown"
           onWheel={(e) => e.stopPropagation()}
         >
-          {FIELD_OPTIONS.map(opt => (
-            <button
-              key={opt.id}
-              type="button"
-              className={`field-zone-option ${value === opt.id ? 'selected' : ''}`}
-              onClick={() => { onChange?.(opt.id); setOpen(false) }}
-            >
-              {opt.label}
-              {value === opt.id && <Check size={16} />}
-            </button>
-          ))}
+          {FIELD_OPTIONS.map(opt => {
+            const locked = isFieldZoneLockedForTariff(effectiveTariff, opt.id)
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                className={`field-zone-option ${value === opt.id ? 'selected' : ''} ${locked ? 'field-zone-option--locked' : ''}`}
+                title={locked ? FIELD_ZONE_UPGRADE_TOOLTIP : undefined}
+                onClick={() => {
+                  if (locked) return
+                  onChange?.(opt.id)
+                  setOpen(false)
+                }}
+              >
+                <span className="field-zone-option-label">{opt.label}</span>
+                <span className="field-zone-option-suffix">
+                  {locked ? <Lock size={14} strokeWidth={2} className="field-zone-lock-icon" aria-hidden /> : null}
+                  {value === opt.id && !locked ? <Check size={16} /> : null}
+                </span>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

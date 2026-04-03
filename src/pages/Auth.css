@@ -48,6 +48,15 @@
   margin-bottom: 1.5rem;
 }
 
+.auth-forgot-wrap {
+  margin: -0.5rem 0 0.75rem;
+  font-size: 0.9rem;
+}
+
+.auth-forgot-wrap a {
+  color: var(--accent);
+}
+
 .auth-card form label {
   display: block;
   margin-bottom: 1rem;
@@ -83,6 +92,13 @@
 .auth-error {
   color: #ef4444;
   font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.auth-success {
+  color: #15803d;
+  font-size: 0.95rem;
+  line-height: 1.45;
   margin-bottom: 0.5rem;
 }
 

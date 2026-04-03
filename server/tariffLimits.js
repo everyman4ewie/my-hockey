@@ -4,9 +4,29 @@
  */
 import { normalizeTariffIdForLimits } from './tariffs.js'
 
+export function getCurrentMonthKey() {
+  return new Date().toISOString().slice(0, 7)
+}
+
+/** Сбрасывает счётчик планов за месяц при смене календарного месяца (объект как user.usage). */
+export function syncMonthlyPlanUsageOnObject(usage) {
+  if (!usage) return
+  const key = getCurrentMonthKey()
+  if (usage.plansMonthKey !== key) {
+    usage.plansMonthKey = key
+    usage.plansCreatedThisMonth = 0
+  }
+}
+
+/** Сбрасывает счётчик планов за месяц при смене календарного месяца. */
+export function syncMonthlyPlanUsage(user) {
+  if (!user.usage) user.usage = {}
+  syncMonthlyPlanUsageOnObject(user.usage)
+}
+
 export const TARIFF_LIMITS = {
   free: {
-    maxPlans: -1,
+    maxPlansPerMonth: 3,
     maxPdfDownloads: -1,
     maxWordDownloads: 0,
     maxBoardDownloads: -1,
@@ -16,7 +36,7 @@ export const TARIFF_LIMITS = {
     canSaveDownloadTacticalVideo: false
   },
   pro: {
-    maxPlans: -1,
+    maxPlansPerMonth: -1,
     maxPdfDownloads: -1,
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
@@ -26,7 +46,7 @@ export const TARIFF_LIMITS = {
     canSaveDownloadTacticalVideo: false
   },
   pro_plus: {
-    maxPlans: -1,
+    maxPlansPerMonth: -1,
     maxPdfDownloads: -1,
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
@@ -36,7 +56,7 @@ export const TARIFF_LIMITS = {
     canSaveDownloadTacticalVideo: true
   },
   admin: {
-    maxPlans: -1,
+    maxPlansPerMonth: -1,
     maxPdfDownloads: -1,
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
@@ -57,8 +77,12 @@ export function canPerform(tariffId, action, usage) {
   const u = usage || {}
   switch (action) {
     case 'createPlan':
-      if (limits.maxPlans < 0) return true
-      return (u.plansCreated || 0) < limits.maxPlans
+      if (limits.maxPlansPerMonth < 0) return true
+      {
+        const monthKey = getCurrentMonthKey()
+        const used = u.plansMonthKey === monthKey ? (u.plansCreatedThisMonth || 0) : 0
+        return used < limits.maxPlansPerMonth
+      }
     case 'downloadPdf':
       if (limits.maxPdfDownloads < 0) return true
       return (u.pdfDownloads || 0) < limits.maxPdfDownloads

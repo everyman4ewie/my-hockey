@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/copy-ffmpeg-to-public.mjs",
+    "prebuild": "node scripts/copy-ffmpeg-to-public.mjs",
     "dev": "vite",
     "dev:all": "concurrently -n \"vite,api\" -c \"cyan,magenta\" \"npm run dev\" \"npm run server\"",
     "build": "vite build",
@@ -12,21 +14,28 @@
     "server:fresh": "lsof -ti:3002 | xargs kill -9 2>/dev/null; node server/index.js",
     "start": "npm run build && node server/index.js",
     "deploy:build": "bash scripts/deploy-production.sh",
-    "deploy:server": "bash scripts/rsync-to-server.sh"
+    "deploy:server": "bash scripts/rsync-to-server.sh",
+    "smtp:verify": "node scripts/smtp-verify.mjs",
+    "mail:verify": "node scripts/smtp-verify.mjs"
   },
   "dependencies": {
+    "@ffmpeg/core": "0.12.9",
     "@ffmpeg/ffmpeg": "^0.12.15",
     "@ffmpeg/util": "^0.12.2",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "docx": "^9.6.1",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
+    "express-rate-limit": "^8.3.2",
     "file-saver": "^2.0.5",
+    "helmet": "^8.1.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.577.0",
     "multer": "^2.1.1",
+    "nodemailer": "^8.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.20.0"

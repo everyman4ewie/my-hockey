@@ -1,7 +1,8 @@
-import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo } from 'react'
-import { Undo2, Redo2, ClipboardPaste, Trash2, Download, ChevronDown, ChevronUp, Pencil } from 'lucide-react'
+import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, forwardRef, useImperativeHandle, Fragment } from 'react'
+import { createPortal } from 'react-dom'
+import { Undo2, Redo2, ClipboardPaste, Trash2, Download, ChevronDown, ChevronUp, Pencil, GripVertical } from 'lucide-react'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { toolIcons } from './ToolIcons'
+import { toolIcons, NineDotsMenuIcon } from './ToolIcons'
 import { newEntityId } from '../../utils/boardEntityId'
 import './HockeyBoard.css'
 
@@ -17,7 +18,7 @@ function setImageSrc(img, src) {
   img.src = src
 }
 
-const TOOLS = [
+export const TOOLS = [
   { id: 'select', label: 'Выбор' },
   { id: 'pen', label: 'Карандаш' },
   { id: 'line', label: 'Линия' },
@@ -43,12 +44,22 @@ const TOOLS = [
   { id: 'barrier', label: 'Барьер' }
 ]
 
+/** На мобильном shell: в панели «папка» — все, кроме быстрых снизу и «Движение». */
+const MOBILE_SHELL_FOLDER_TOOL_IDS = new Set(
+  TOOLS.map((t) => t.id).filter((id) => !['player', 'playerTriangle', 'puck', 'curve'].includes(id))
+)
+
 const ICON_TYPES_WITH_INDEX = ['player', 'playerTriangle', 'forward', 'defender']
+
+/** Начальная позиция всплывающего блока номера — смещение влево от прежнего центра по якорю/экрану. */
+const PLAYER_INDEX_POPOVER_INITIAL_SHIFT_LEFT_PX = 600
 
 /** Двойной клик по объекту при другом инструменте: переключить на «Выбор» и выделить объект (одиночный клик в «Выбор» — как раньше). */
 const SWITCH_TO_SELECT_DOUBLE_CLICK_MS = 800
 /** Второй клик считается «тем же местом», что и первый (индекс после 1-го клика может смениться из‑за нового штриха/иконки). */
 const SWITCH_TO_SELECT_PROXIMITY_PX = 28
+/** На тач-экране: удержание вместо двойного клика. Должно быть > PLACEMENT_DOUBLE_CLICK_DELAY_MS. */
+const SWITCH_TO_SELECT_LONG_PRESS_MS = 450
 /** Задержка перед появлением объекта — время на проверку двойного клика (переключение в «Выбор»). */
 const PLACEMENT_DOUBLE_CLICK_DELAY_MS = 280
 /** Если за это время курсор сдвинулся (рисование линии/карандаша), отменяем ожидание и фиксируем штрих сразу. */
@@ -114,6 +125,29 @@ const COLORS = [
   { hex: '#ca8a04', name: 'Жёлтый' },
   { hex: '#ffffff', name: 'Белый' }
 ]
+
+/** Внутренняя заливка фигуры «Прямоугольник» — цвет инструмента с этой альфой (обводка остаётся непрозрачной). */
+const RECT_FILL_OPACITY = 0.15
+
+function hexColorToRgba(color, alpha) {
+  if (!color || typeof color !== 'string') return `rgba(0,0,0,${alpha})`
+  const c = color.trim()
+  if (c.startsWith('#')) {
+    let h = c.slice(1)
+    if (h.length === 3) h = h.split('').map((ch) => ch + ch).join('')
+    if (h.length === 6) {
+      const r = parseInt(h.slice(0, 2), 16)
+      const g = parseInt(h.slice(2, 4), 16)
+      const b = parseInt(h.slice(4, 6), 16)
+      if (!Number.isNaN(r) && !Number.isNaN(g) && !Number.isNaN(b)) {
+        return `rgba(${r},${g},${b},${alpha})`
+      }
+    }
+  }
+  const m = c.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i)
+  if (m) return `rgba(${m[1]},${m[2]},${m[3]},${alpha})`
+  return `rgba(0,0,0,${alpha})`
+}
 
 const WAVE_STYLES = [
   { id: 'single', label: 'Ведение шайбы' },
@@ -231,7 +265,7 @@ function pathIntersectsRect(p, x1, y1, x2, y2) {
   return false
 }
 
-function iconIntersectsRect(ic, x1, y1, x2, y2) {
+function iconIntersectsRect(ic, x1, y1, x2, y2, shellIconScale = 1) {
   if (ic.type === 'puckCluster') {
     const minX = Math.min(x1, x2)
     const maxX = Math.max(x1, x2)
@@ -244,24 +278,27 @@ function iconIntersectsRect(ic, x1, y1, x2, y2) {
     })) return true
   }
   if (ic.type === 'goal') {
-    // Центр в расширенном rect ИЛИ любая вершина rect попадает в тело ворот (полукруг)
+    const gR = GOAL_ICON_R * shellIconScale
     const corners = [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x2, y: y2 }, { x: x1, y: y2 }]
-    if (corners.some(c => hitTestGoalIcon(ic, c.x, c.y))) return true
-    const r = GOAL_ICON_R
-    return ic.x >= x1 - r && ic.x <= x2 + r && ic.y >= y1 - r && ic.y <= y2 + r
+    if (corners.some(c => hitTestGoalIcon(ic, c.x, c.y, gR))) return true
+    return ic.x >= x1 - gR && ic.x <= x2 + gR && ic.y >= y1 - gR && ic.y <= y2 + gR
   }
   return rectContains(ic.x, ic.y, x1, y1, x2, y2)
 }
 
 const GOAL_ICON_R = 22
+/** Мобильный shell: крупнее маркеры игроков, ворот, тренера, вратаря, препятствий (десктоп без изменений). */
+const MOBILE_SHELL_ICON_SCALE = 1.38
+/** После contain: слегка уменьшить холст (большая сторона −N px, вторая пропорционально), небольшой внутренний отступ. */
+const FIT_DISPLAY_SHRINK_PX = 20
 
 // Hit-test: точка внутри ворот. Тело = полный круг радиуса r (визуально — полукруг).
 // Это гарантирует кликабельность всей видимой области ворот при любом угле.
-function hitTestGoalIcon(ic, px, py) {
+function hitTestGoalIcon(ic, px, py, goalRadius = GOAL_ICON_R) {
   const cx = ic.x
   const cy = ic.y
   const d2 = (px - cx) ** 2 + (py - cy) ** 2
-  const r2 = GOAL_ICON_R * GOAL_ICON_R
+  const r2 = goalRadius * goalRadius
   return d2 <= r2
 }
 
@@ -286,8 +323,9 @@ const PUCK_CLUSTER_OFFSETS = (() => {
   }))
 })()
 
-function hitTestIcon(ic, coords) {
-  if (ic.type === 'goal') return hitTestGoalIcon(ic, coords.x, coords.y)
+function hitTestIcon(ic, coords, shellIconScale = 1) {
+  const gR = GOAL_ICON_R * shellIconScale
+  if (ic.type === 'goal') return hitTestGoalIcon(ic, coords.x, coords.y, gR)
   if (ic.type === 'puck') return Math.hypot(coords.x - ic.x, coords.y - ic.y) < PUCK_ICON_R + 3
   if (ic.type === 'puckCluster') {
     for (const o of PUCK_CLUSTER_OFFSETS) {
@@ -295,17 +333,17 @@ function hitTestIcon(ic, coords) {
     }
     return Math.hypot(coords.x - ic.x, coords.y - ic.y) < PUCK_CLUSTER_SPREAD + PUCK_CLUSTER_DOT_R + 3
   }
-  if (ic.type === 'cone' || ic.type === 'barrier') return Math.hypot(coords.x - ic.x, coords.y - ic.y) < 16
+  if (ic.type === 'cone' || ic.type === 'barrier') return Math.hypot(coords.x - ic.x, coords.y - ic.y) < 16 * shellIconScale
   if (ic.type === 'numberMark') {
     const pad = (ic.num?.length || 1) > 1 ? 18 : 12
     return Math.hypot(coords.x - ic.x, coords.y - ic.y) < pad
   }
-  return Math.hypot(coords.x - ic.x, coords.y - ic.y) < 14
+  return Math.hypot(coords.x - ic.x, coords.y - ic.y) < 14 * shellIconScale
 }
 
-function getGoalRotationHandlePos(ic) {
+function getGoalRotationHandlePos(ic, goalRadius = GOAL_ICON_R) {
   const angle = ((ic.angle || 0) * Math.PI) / 180
-  const dist = GOAL_ICON_R + 12
+  const dist = goalRadius + 12
   return {
     x: ic.x + dist * Math.sin(angle),
     y: ic.y + dist * Math.cos(angle)
@@ -341,24 +379,50 @@ function hitTestPath(p, coords) {
   return false
 }
 
-export default function HockeyBoard({
-  paths = [],
-  icons = [],
-  onChange,
-  readOnly,
-  canvasId,
-  width: canvasW = 800,
-  height: canvasH = 400,
-  toolbarRight,
-  fieldZone = 'full',
-  teamLogo,
-  canDownloadPng = true,
-  onDownloadPng,
-  customBackgrounds = {},
-  fitCanvasToContainer = false,
-  /** На узких экранах не сворачивать панель в одну строку «Инструменты» (страница видео и т.п.). */
-  alwaysShowFullMobileToolbar = false
-}) {
+const HockeyBoard = forwardRef(function HockeyBoard(
+  {
+    paths = [],
+    icons = [],
+    onChange,
+    readOnly,
+    canvasId,
+    width: canvasW = 800,
+    height: canvasH = 400,
+    toolbarRight,
+    fieldZone = 'full',
+    teamLogo,
+    canDownloadPng = true,
+    onDownloadPng,
+    customBackgrounds = {},
+    fitCanvasToContainer = false,
+    /** На узких экранах не сворачивать панель в одну строку «Инструменты» (страница видео и т.п.). */
+    alwaysShowFullMobileToolbar = false,
+    /** Слои снизу вверх: { id?, paths, icons, dimmed } — неактивные рисуются серыми. */
+    layersRender,
+    /** id активного слоя (для PNG только этого слоя). */
+    activeLayerId,
+    /** Несколько слоёв: меню «Очистить» с пунктами текущий / все. */
+    clearMenuWithLayers = false,
+    onClearAllLayers,
+    /** Мобильный макет: папка + хром сверху, игроки/шайба снизу. В портрете — холст как раньше (90° + маппинг координат); в ландшафте — без этого поворота, блок под ширину экрана. */
+    mobileShellLayout = false,
+    mobileToolbarChromeLeft = null,
+    /** Центр верхней полоски (моб. план: стрелки упражнений). */
+    mobileToolbarChromeCenter = null,
+    mobileToolbarChromeRight = null,
+    /** Если задан массив id инструментов — в панели только они (как у пользователей в каталоге). */
+    allowedToolIds = null,
+    /** Тактическая доска (десктоп): номер игрока во всплывающем окне, как в мобильном shell. */
+    floatingPlayerIndex = false
+  },
+  ref
+) {
+  const toolsForToolbar = useMemo(() => {
+    if (!allowedToolIds || !Array.isArray(allowedToolIds) || allowedToolIds.length === 0) return TOOLS
+    const set = new Set(allowedToolIds)
+    return TOOLS.filter((t) => set.has(t.id))
+  }, [allowedToolIds])
+
   const canvasRef = useRef(null)
   const boardCanvasWrapRef = useRef(null)
   const boardToolbarRef = useRef(null)
@@ -369,10 +433,20 @@ export default function HockeyBoard({
   const [tool, setTool] = useState('pen')
   const [color, setColor] = useState('#000000')
   useEffect(() => {
+    if (readOnly) return
+    if (toolsForToolbar.some((t) => t.id === tool)) return
+    setTool(toolsForToolbar[0]?.id || 'pen')
+  }, [readOnly, toolsForToolbar, tool])
+  useEffect(() => {
     if (tool === 'cone' || tool === 'barrier') setColor('#dc2626')
   }, [tool])
   const [strokeWidth, setStrokeWidth] = useState(3)
   const [isDrawing, setIsDrawing] = useState(false)
+  const isDrawingRef = useRef(false)
+  useEffect(() => {
+    isDrawingRef.current = isDrawing
+  }, [isDrawing])
+
   const [start, setStart] = useState(null)
   const [selectedIcons, setSelectedIcons] = useState([])
   const [selectedPaths, setSelectedPaths] = useState([])
@@ -383,13 +457,156 @@ export default function HockeyBoard({
   const [waveDirection, setWaveDirection] = useState(false)
   const [waveMenuOpen, setWaveMenuOpen] = useState(false)
   const [numberMenuOpen, setNumberMenuOpen] = useState(false)
+  const [penMenuOpen, setPenMenuOpen] = useState(false)
   const [pencilMenuOpen, setPencilMenuOpen] = useState(false)
   const [numberDigit, setNumberDigit] = useState(1)
   const [autoIndexByIconType, setAutoIndexByIconType] = useState(() => ({ ...DEFAULT_AUTO_INDEX_BY_ICON_TYPE }))
   const [penArrowEnd, setPenArrowEnd] = useState(false)
   const isMobileToolbar = useMediaQuery('(max-width: 768px)')
+  const isPortrait = useMediaQuery('(orientation: portrait)')
+  /** Поворот 90° (как в исходном shell) — только в вертикали; в горизонтали холст без rotate, в ряд с поворотом экрана. */
+  const isMobileShellPortraitRotate = mobileShellLayout && isMobileToolbar && isPortrait
+  const showPlayerIndexPopover = useMemo(
+    () =>
+      !readOnly &&
+      selectedIcons.length === 1 &&
+      ICON_TYPES_WITH_INDEX.includes(icons[selectedIcons[0]]?.type) &&
+      ((mobileShellLayout && isMobileToolbar) || (floatingPlayerIndex && !mobileShellLayout)),
+    [readOnly, mobileShellLayout, isMobileToolbar, floatingPlayerIndex, selectedIcons, icons]
+  )
+  const shellIconScale = useMemo(
+    () => (mobileShellLayout && isMobileToolbar ? MOBILE_SHELL_ICON_SCALE : 1),
+    [mobileShellLayout, isMobileToolbar]
+  )
   const useMobileVideoToolbar = alwaysShowFullMobileToolbar && isMobileToolbar
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
+  const [pngExportLayerId, setPngExportLayerId] = useState(null)
+  /** На время снимка PNG с панели — все слои полной непрозрачности, без выделения. */
+  const [pngExportAllLayers, setPngExportAllLayers] = useState(false)
+  const [clearMenuOpen, setClearMenuOpen] = useState(false)
+  const [mobileFolderOpen, setMobileFolderOpen] = useState(false)
+  const mobileShellBottomDockRef = useRef(null)
+  const playerIndexPopoverRef = useRef(null)
+  const playerIndexPopoverDragRef = useRef(null)
+  const [mobilePlayerIndexPopoverPos, setMobilePlayerIndexPopoverPos] = useState(null)
+  const [playerIndexPopoverDragging, setPlayerIndexPopoverDragging] = useState(false)
+
+  useEffect(() => {
+    if (!showPlayerIndexPopover) {
+      setMobilePlayerIndexPopoverPos(null)
+    }
+  }, [showPlayerIndexPopover])
+
+  useLayoutEffect(() => {
+    if (!showPlayerIndexPopover || mobilePlayerIndexPopoverPos !== null) return
+    const pad = 8
+    const popW = 260
+    const popH = 120
+    if (mobileShellLayout && isMobileToolbar) {
+      const dockEl = mobileShellBottomDockRef.current
+      if (dockEl) {
+        const r = dockEl.getBoundingClientRect()
+        const left = Math.max(
+          pad,
+          Math.min(
+            window.innerWidth - popW - pad,
+            (r.left + r.right) / 2 - popW / 2 - PLAYER_INDEX_POPOVER_INITIAL_SHIFT_LEFT_PX
+          )
+        )
+        const top = Math.max(pad, r.top - popH - 8)
+        setMobilePlayerIndexPopoverPos({ left, top })
+      } else {
+        setMobilePlayerIndexPopoverPos({
+          left: Math.max(pad, (window.innerWidth - popW) / 2 - PLAYER_INDEX_POPOVER_INITIAL_SHIFT_LEFT_PX),
+          top: Math.max(pad, window.innerHeight - popH - 160)
+        })
+      }
+    } else if (floatingPlayerIndex && boardToolbarRef.current) {
+      const r = boardToolbarRef.current.getBoundingClientRect()
+      const left = Math.max(
+        pad,
+        Math.min(
+          window.innerWidth - popW - pad,
+          (r.left + r.right) / 2 - popW / 2 - PLAYER_INDEX_POPOVER_INITIAL_SHIFT_LEFT_PX
+        )
+      )
+      const top = Math.max(pad, r.bottom + 8)
+      setMobilePlayerIndexPopoverPos({ left, top })
+    } else {
+      setMobilePlayerIndexPopoverPos({
+        left: Math.max(pad, (window.innerWidth - popW) / 2 - PLAYER_INDEX_POPOVER_INITIAL_SHIFT_LEFT_PX),
+        top: Math.max(pad, window.innerHeight - popH - 160)
+      })
+    }
+  }, [showPlayerIndexPopover, mobilePlayerIndexPopoverPos, mobileShellLayout, isMobileToolbar, floatingPlayerIndex])
+
+  useEffect(() => {
+    if (!showPlayerIndexPopover || !mobilePlayerIndexPopoverPos) return
+    const onResize = () => {
+      setMobilePlayerIndexPopoverPos((pos) => {
+        if (!pos) return pos
+        const el = playerIndexPopoverRef.current
+        const w = el?.offsetWidth ?? 260
+        const h = el?.offsetHeight ?? 120
+        const pad = 8
+        return {
+          left: Math.max(pad, Math.min(window.innerWidth - w - pad, pos.left)),
+          top: Math.max(pad, Math.min(window.innerHeight - h - pad, pos.top))
+        }
+      })
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [showPlayerIndexPopover, mobilePlayerIndexPopoverPos])
+
+  const onPlayerIndexPopoverHandlePointerDown = useCallback((e) => {
+    if (e.button !== 0) return
+    const pos = mobilePlayerIndexPopoverPos
+    if (!pos) return
+    e.preventDefault()
+    e.stopPropagation()
+    setPlayerIndexPopoverDragging(true)
+    playerIndexPopoverDragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origLeft: pos.left,
+      origTop: pos.top
+    }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }, [mobilePlayerIndexPopoverPos])
+
+  const onPlayerIndexPopoverHandlePointerMove = useCallback((e) => {
+    const d = playerIndexPopoverDragRef.current
+    if (!d || e.pointerId !== d.pointerId) return
+    const dx = e.clientX - d.startX
+    const dy = e.clientY - d.startY
+    let nextLeft = d.origLeft + dx
+    let nextTop = d.origTop + dy
+    const el = playerIndexPopoverRef.current
+    const w = el?.offsetWidth ?? 260
+    const h = el?.offsetHeight ?? 120
+    const pad = 8
+    nextLeft = Math.max(pad, Math.min(window.innerWidth - w - pad, nextLeft))
+    nextTop = Math.max(pad, Math.min(window.innerHeight - h - pad, nextTop))
+    setMobilePlayerIndexPopoverPos({ left: nextLeft, top: nextTop })
+  }, [])
+
+  const onPlayerIndexPopoverHandlePointerUp = useCallback((e) => {
+    const d = playerIndexPopoverDragRef.current
+    if (d && e.pointerId === d.pointerId) {
+      playerIndexPopoverDragRef.current = null
+      setPlayerIndexPopoverDragging(false)
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId)
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (!isMobileToolbar) setMobileToolsOpen(false)
   }, [isMobileToolbar])
@@ -411,7 +628,7 @@ export default function HockeyBoard({
   }, [pencilMenuOpen])
 
   const showMobileCollapsedToolbar =
-    isMobileToolbar && !alwaysShowFullMobileToolbar && !mobileToolsOpen
+    isMobileToolbar && !alwaysShowFullMobileToolbar && !mobileToolsOpen && !mobileShellLayout
 
   useLayoutEffect(() => {
     if (!fitCanvasToContainer || readOnly || isMobileToolbar) {
@@ -451,12 +668,73 @@ export default function HockeyBoard({
     }
   }, [fitCanvasToContainer])
 
-  /** Масштаб отображения: холст заполняет слот с сохранением пропорций (как object-fit: contain). */
+  /**
+   * Масштаб при fitCanvasToContainer: строгий contain в слоте (clientWidth/Height у .board-canvas-wrap —
+   * область между верхней и нижней панелями shell, без захода под них).
+   * Мобильный shell + rotate(90°): видимый AABB = canvasH×canvasW → s0 = min(slotW/cH, slotH/cW).
+   * Десктоп / без shell: s0 = min(slotW/cW, slotH/cH).
+   * Затем равномерно −FIT_DISPLAY_SHRINK_PX по max(w,h).
+   */
   const fitDisplaySize = useMemo(() => {
     if (!fitCanvasToContainer || fitSlotPx.w <= 0 || fitSlotPx.h <= 0) return null
-    const s = Math.min(fitSlotPx.w / canvasW, fitSlotPx.h / canvasH)
-    return { w: canvasW * s, h: canvasH * s }
-  }, [fitCanvasToContainer, fitSlotPx.w, fitSlotPx.h, canvasW, canvasH])
+    const shell = isMobileShellPortraitRotate
+    const s0 = shell
+      ? Math.min(fitSlotPx.w / canvasH, fitSlotPx.h / canvasW)
+      : Math.min(fitSlotPx.w / canvasW, fitSlotPx.h / canvasH)
+    let w = canvasW * s0
+    let h = canvasH * s0
+    const maxDim = Math.max(w, h)
+    if (maxDim > FIT_DISPLAY_SHRINK_PX) {
+      const k = (maxDim - FIT_DISPLAY_SHRINK_PX) / maxDim
+      w *= k
+      h *= k
+    }
+    return { w, h, shellRotatedLayout: shell }
+  }, [fitCanvasToContainer, fitSlotPx.w, fitSlotPx.h, canvasW, canvasH, isMobileShellPortraitRotate])
+
+  const fitDisplaySizeRef = useRef(fitDisplaySize)
+  useLayoutEffect(() => {
+    fitDisplaySizeRef.current = fitDisplaySize
+  }, [fitDisplaySize])
+
+  /** Колесо над canvas: прокрутка ближайшего overflow:auto / страницы (listener не passive — иначе preventDefault бессилен). */
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || readOnly) return
+    const onWheel = (e) => {
+      let el = canvas.parentElement
+      while (el && el !== document.body) {
+        const st = getComputedStyle(el)
+        const oy = st.overflowY
+        const ov = st.overflow
+        const max = el.scrollHeight - el.clientHeight
+        if (
+          max > 1 &&
+          (oy === 'auto' || oy === 'scroll' || ov === 'auto' || ov === 'scroll')
+        ) {
+          const next = el.scrollTop + e.deltaY
+          const clamped = Math.max(0, Math.min(max, next))
+          if (clamped !== el.scrollTop) {
+            el.scrollTop = clamped
+            e.preventDefault()
+          }
+          return
+        }
+        el = el.parentElement
+      }
+      const maxDoc = document.documentElement.scrollHeight - window.innerHeight
+      if (maxDoc > 1) {
+        const next = window.scrollY + e.deltaY
+        const clamped = Math.max(0, Math.min(maxDoc, next))
+        if (Math.abs(clamped - window.scrollY) > 0.5) {
+          window.scrollTo(0, clamped)
+          e.preventDefault()
+        }
+      }
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
+  }, [readOnly, fitDisplaySize, canvasW, canvasH])
 
   const historyRef = useRef([])
   const redoRef = useRef([])
@@ -467,6 +745,11 @@ export default function HockeyBoard({
   const iconsRef = useRef(icons)
   const deferredPlacementTimerRef = useRef(null)
   const deferredPlacementPayloadRef = useRef(null)
+  /** Тач: удержание по объекту → «Выбор»; таймер long-press. */
+  const touchLongPressSelectTimerRef = useRef(null)
+  /** Тач: размещение по отпусканию, без ожидания 280 ms (двойной клик не применим). */
+  const touchDeferPlacementUntilPointerUpRef = useRef(false)
+  const longPressSelectFiredRef = useRef(false)
   pathsRef.current = paths
   iconsRef.current = icons
   const DRAG_THRESHOLD = 5
@@ -480,6 +763,19 @@ export default function HockeyBoard({
   const teamLogoImgRef = useRef(null)
   /** У тач-устройств в pointermove часто e.buttons === 0 — держим активный pointer после setPointerCapture */
   const activePointerIdRef = useRef(null)
+  /** Тач: capture только после начала жеста рисования/перетаскивания — иначе страница не скроллится поверх canvas */
+  const touchPointerCaptureSetRef = useRef(false)
+  /** Синхронно после handleMouseDown: сразу setPointerCapture на таче, пока стейт ещё не обновил touch-action */
+  const touchCaptureAfterDownRef = useRef(false)
+
+  /**
+   * На узком экране всегда touch-action: none — иначе вертикальный жест уходит в скролл/pull-to-refresh,
+   * линии обрываются, pointermove с touch теряется. Страница тактики/плана в shell не скроллится.
+   */
+  const canvasTouchAction = useMemo(() => {
+    if (!isMobileToolbar) return 'pan-y'
+    return 'none'
+  }, [isMobileToolbar])
 
   const isPrimaryHeld = useCallback((e) => {
     if (e.pointerId != null && activePointerIdRef.current === e.pointerId) return true
@@ -547,18 +843,37 @@ export default function HockeyBoard({
     onChange?.({ paths: newPaths, icons: newIcons })
   }, [paths, icons, onChange, pushUndo])
 
-  const getCanvasCoords = useCallback((e) => {
-    const canvas = canvasRef.current
-    if (!canvas) return { x: 0, y: 0 }
-    const rect = canvas.getBoundingClientRect()
-    const scaleX = canvas.width / rect.width
-    const scaleY = canvas.height / rect.height
-    const cx = e.clientX ?? e.touches?.[0]?.clientX ?? e.changedTouches?.[0]?.clientX ?? 0
-    const cy = e.clientY ?? e.touches?.[0]?.clientY ?? e.changedTouches?.[0]?.clientY ?? 0
-    const bufX = (cx - rect.left) * scaleX
-    const bufY = (cy - rect.top) * scaleY
-    return { x: bufX, y: bufY }
-  }, [])
+  const getCanvasCoords = useCallback(
+    (e) => {
+      const canvas = canvasRef.current
+      if (!canvas) return { x: 0, y: 0 }
+      const cx = e.clientX ?? e.touches?.[0]?.clientX ?? e.changedTouches?.[0]?.clientX ?? 0
+      const cy = e.clientY ?? e.touches?.[0]?.clientY ?? e.changedTouches?.[0]?.clientY ?? 0
+      const rect = canvas.getBoundingClientRect()
+      const fd = fitDisplaySizeRef.current
+      if (fd?.shellRotatedLayout && fd.w > 0 && fd.h > 0) {
+        /* Холст с transform: rotate(90deg): обратный поворот экран→локальные координаты битмапа (ось X вправо, Y вниз). */
+        const ccx = rect.left + rect.width / 2
+        const ccy = rect.top + rect.height / 2
+        const dx = cx - ccx
+        const dy = cy - ccy
+        const lx = dy
+        const ly = -dx
+        const bufX = (lx + fd.w / 2) * (canvas.width / fd.w)
+        const bufY = (ly + fd.h / 2) * (canvas.height / fd.h)
+        return {
+          x: Math.max(0, Math.min(canvas.width, bufX)),
+          y: Math.max(0, Math.min(canvas.height, bufY))
+        }
+      }
+      const scaleX = canvas.width / rect.width
+      const scaleY = canvas.height / rect.height
+      const bufX = (cx - rect.left) * scaleX
+      const bufY = (cy - rect.top) * scaleY
+      return { x: bufX, y: bufY }
+    },
+    []
+  )
 
   const notifyChange = useCallback((newPaths, newIcons) => {
     onChange?.({ paths: newPaths ?? paths, icons: newIcons ?? icons })
@@ -569,7 +884,12 @@ export default function HockeyBoard({
       clearTimeout(deferredPlacementTimerRef.current)
       deferredPlacementTimerRef.current = null
     }
+    if (touchLongPressSelectTimerRef.current) {
+      clearTimeout(touchLongPressSelectTimerRef.current)
+      touchLongPressSelectTimerRef.current = null
+    }
     deferredPlacementPayloadRef.current = null
+    touchDeferPlacementUntilPointerUpRef.current = false
   }, [])
 
   const runDeferredPlacementFromPayload = useCallback((payload) => {
@@ -625,6 +945,7 @@ export default function HockeyBoard({
     }
 
     setStart(c)
+    isDrawingRef.current = true
     setIsDrawing(true)
     if (placementTool === 'pen' || placementTool === 'curve' || placementTool === 'lateral') {
       pushUndo()
@@ -763,13 +1084,43 @@ export default function HockeyBoard({
         ctx.fillText('Загрузка площадки...', 10, 20)
       }
 
-      paths.forEach((p, pIdx) => {
-        const pathAlpha = p.opacity != null ? p.opacity : 1
+      let layersToDraw =
+        Array.isArray(layersRender) && layersRender.length > 0
+          ? layersRender
+          : [{ paths, icons, dimmed: false }]
+
+      if (pngExportLayerId != null && String(pngExportLayerId).length > 0) {
+        const found = layersToDraw.find((l) => String(l.id || '') === String(pngExportLayerId))
+        if (found) {
+          layersToDraw = [{ paths: found.paths, icons: found.icons, dimmed: false, id: found.id }]
+        }
+      }
+
+      layersToDraw.forEach((layer) => {
+        const layerPaths = layer.paths
+        const layerIcons = layer.icons
+        const dimmed = !!layer.dimmed && !pngExportAllLayers
+        const isThisActiveLayer =
+          String(layer.id || '') === String(activeLayerId || '') ||
+          (!layer.id && layersToDraw.length <= 1)
+        /** Любой снимок для PNG — без рамки выделения и фиолетовых маркеров. */
+        const isPngExportSnapshot =
+          pngExportAllLayers ||
+          (pngExportLayerId != null && String(pngExportLayerId).length > 0)
+        /** Неактивные слои — полупрозрачные «ниже» активного (видно сквозь верхний слой). */
+        const layerDimMul = dimmed ? 0.42 : 1
+        const selP =
+          isPngExportSnapshot || dimmed || !isThisActiveLayer ? [] : selectedPaths
+        const selI =
+          isPngExportSnapshot || dimmed || !isThisActiveLayer ? [] : selectedIcons
+
+      layerPaths.forEach((p, pIdx) => {
+        const pathAlpha = (p.opacity != null ? p.opacity : 1) * layerDimMul
         if (pathAlpha < 0.001) return
         ctx.save()
         ctx.globalAlpha = pathAlpha
-        ctx.strokeStyle = selectedPaths.includes(pIdx) ? '#9333ea' : (p.color || '#000')
-        ctx.lineWidth = selectedPaths.includes(pIdx) ? (p.width || 2) + 1 : (p.width || 2)
+        ctx.strokeStyle = selP.includes(pIdx) ? '#9333ea' : (p.color || '#000')
+        ctx.lineWidth = selP.includes(pIdx) ? (p.width || 2) + 1 : (p.width || 2)
         if (p.type === 'path') {
           ctx.lineCap = 'round'
           ctx.lineJoin = 'round'
@@ -947,6 +1298,8 @@ export default function HockeyBoard({
           }
           if (p.type === 'dashedArrow') ctx.setLineDash([])
         } else if (p.type === 'rect') {
+          ctx.fillStyle = hexColorToRgba(p.color || '#000000', RECT_FILL_OPACITY)
+          ctx.fillRect(p.x, p.y, p.w, p.h)
           ctx.strokeRect(p.x, p.y, p.w, p.h)
         } else if (p.type === 'circle') {
           const r = Math.sqrt((p.x2 - p.x1) ** 2 + (p.y2 - p.y1) ** 2)
@@ -958,7 +1311,7 @@ export default function HockeyBoard({
       })
 
       const drawEndpointMarkers = (pathIdx) => {
-        const p = paths[pathIdx]
+        const p = layerPaths[pathIdx]
         const ep = getPathEndpoints(p)
         if (!ep) return
         ctx.fillStyle = '#9333ea'
@@ -971,15 +1324,15 @@ export default function HockeyBoard({
           ctx.stroke()
         })
       }
-      paths.forEach((p, pIdx) => {
+      layerPaths.forEach((p, pIdx) => {
         if ((p.type === 'path' && p.points?.length >= 2) || p.type === 'line' || p.type === 'arrow' || p.type === 'dashedArrow' || p.type === 'doubleArrow') {
-          if (tool === 'select' && (selectedPaths.includes(pIdx) || extendingEndpoint?.pathIdx === pIdx) && selectedPaths.length === 1) {
+          if (tool === 'select' && (selP.includes(pIdx) || extendingEndpoint?.pathIdx === pIdx) && selP.length === 1) {
             drawEndpointMarkers(pIdx)
           }
         }
       })
 
-      if (selectionBox) {
+      if (!dimmed && selectionBox && !isPngExportSnapshot && isThisActiveLayer) {
         const { start, current } = selectionBox
         ctx.strokeStyle = 'rgba(147, 51, 234, 0.8)'
         ctx.lineWidth = 2
@@ -991,27 +1344,40 @@ export default function HockeyBoard({
         ctx.setLineDash([])
       }
 
-      icons.forEach((ic, idx) => {
-        const iconAlpha = ic.opacity != null ? ic.opacity : 1
+      layerIcons.forEach((ic, idx) => {
+        const iconAlpha = (ic.opacity != null ? ic.opacity : 1) * layerDimMul
         if (iconAlpha < 0.001) return
         ctx.save()
         ctx.globalAlpha = iconAlpha
-        const size = 22
+        /* Портрет + shell: холст с rotate(90deg) — компенсируем маркер вокруг (ic.x,ic.y), чтобы «И» не лежало боком. */
+        const shellCanvasRotatedLayout = isMobileShellPortraitRotate
+        const spinPlayerIconForShell =
+          shellCanvasRotatedLayout &&
+          ['player', 'playerTriangle', 'coach', 'goalkeeper', 'forward', 'defender'].includes(ic.type)
+        if (spinPlayerIconForShell) {
+          ctx.translate(ic.x, ic.y)
+          ctx.rotate(-Math.PI / 2)
+          ctx.translate(-ic.x, -ic.y)
+        }
+        const size = 22 * shellIconScale
+        const fsMain = Math.round(11 * shellIconScale)
+        const fsIdx = Math.round(10 * shellIconScale)
+        const fsCoachGk = Math.round(10 * shellIconScale)
         const iconColor = ic.color || '#dc2626'
-        ctx.strokeStyle = selectedIcons.includes(idx) ? '#9333ea' : iconColor
-        ctx.lineWidth = selectedIcons.includes(idx) ? 3 : 2
+        ctx.strokeStyle = selI.includes(idx) ? '#9333ea' : iconColor
+        ctx.lineWidth = selI.includes(idx) ? 3 : 2
         if (ic.type === 'player') {
           ctx.beginPath()
           ctx.arc(ic.x, ic.y, size / 2, 0, Math.PI * 2)
           ctx.stroke()
           ctx.fillStyle = iconColor
-          ctx.font = 'bold 11px system-ui'
+          ctx.font = `bold ${fsMain}px system-ui`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText('И', ic.x, ic.y)
           const idxPl = iconIndexLabel(ic)
           if (idxPl) {
-            ctx.font = 'bold 10px system-ui'
+            ctx.font = `bold ${fsIdx}px system-ui`
             ctx.textAlign = 'left'
             ctx.textBaseline = 'top'
             ctx.fillText(idxPl, ic.x + size / 2 + 2, ic.y + size / 2 - 2)
@@ -1025,13 +1391,13 @@ export default function HockeyBoard({
           ctx.closePath()
           ctx.stroke()
           ctx.fillStyle = iconColor
-          ctx.font = 'bold 11px system-ui'
+          ctx.font = `bold ${fsMain}px system-ui`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText('И', ic.x, ic.y)
           const idxTri = iconIndexLabel(ic)
           if (idxTri) {
-            ctx.font = 'bold 10px system-ui'
+            ctx.font = `bold ${fsIdx}px system-ui`
             ctx.textAlign = 'left'
             ctx.textBaseline = 'top'
             ctx.fillText(idxTri, ic.x + r * 0.9 + 2, ic.y + r * 0.6 - 2)
@@ -1043,7 +1409,7 @@ export default function HockeyBoard({
           ctx.fill()
           ctx.stroke()
           ctx.fillStyle = '#fff'
-          ctx.font = 'bold 10px system-ui'
+          ctx.font = `bold ${fsCoachGk}px system-ui`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText('Тр', ic.x, ic.y)
@@ -1054,7 +1420,7 @@ export default function HockeyBoard({
           ctx.fill()
           ctx.stroke()
           ctx.fillStyle = '#fff'
-          ctx.font = 'bold 10px system-ui'
+          ctx.font = `bold ${fsCoachGk}px system-ui`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText('Вр', ic.x, ic.y)
@@ -1070,13 +1436,13 @@ export default function HockeyBoard({
           ctx.arc(ic.x, ic.y, size / 2, 0, Math.PI * 2)
           ctx.stroke()
           ctx.fillStyle = iconColor
-          ctx.font = 'bold 11px system-ui'
+          ctx.font = `bold ${fsMain}px system-ui`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText('Н', ic.x, ic.y)
           const idxFw = iconIndexLabel(ic)
           if (idxFw) {
-            ctx.font = 'bold 10px system-ui'
+            ctx.font = `bold ${fsIdx}px system-ui`
             ctx.textAlign = 'left'
             ctx.textBaseline = 'top'
             ctx.fillText(idxFw, ic.x + size / 2 + 2, ic.y + size / 2 - 2)
@@ -1090,13 +1456,13 @@ export default function HockeyBoard({
           ctx.closePath()
           ctx.stroke()
           ctx.fillStyle = iconColor
-          ctx.font = 'bold 11px system-ui'
+          ctx.font = `bold ${fsMain}px system-ui`
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
           ctx.fillText('З', ic.x, ic.y)
           const idxDf = iconIndexLabel(ic)
           if (idxDf) {
-            ctx.font = 'bold 10px system-ui'
+            ctx.font = `bold ${fsIdx}px system-ui`
             ctx.textAlign = 'left'
             ctx.textBaseline = 'top'
             ctx.fillText(idxDf, ic.x + r * 0.9 + 2, ic.y + r * 0.6 - 2)
@@ -1118,7 +1484,7 @@ export default function HockeyBoard({
             ctx.stroke()
           }
         } else if (ic.type === 'cone') {
-          const w = 10, h = 14
+          const w = 10 * shellIconScale, h = 14 * shellIconScale
           ctx.beginPath()
           ctx.moveTo(ic.x - w, ic.y)
           ctx.lineTo(ic.x + w, ic.y)
@@ -1126,7 +1492,7 @@ export default function HockeyBoard({
           ctx.lineTo(ic.x, ic.y - h)
           ctx.stroke()
         } else if (ic.type === 'barrier') {
-          const w = 10, h = 12
+          const w = 10 * shellIconScale, h = 12 * shellIconScale
           ctx.beginPath()
           ctx.moveTo(ic.x - w, ic.y - h)
           ctx.lineTo(ic.x + w, ic.y - h)
@@ -1136,32 +1502,35 @@ export default function HockeyBoard({
           ctx.lineTo(ic.x + w, ic.y + h)
           ctx.stroke()
         } else if (ic.type === 'goal') {
-          const r = GOAL_ICON_R
+          const r = GOAL_ICON_R * shellIconScale
           const angle = ((ic.angle || 0) * Math.PI) / 180
           ctx.save()
           ctx.translate(ic.x, ic.y)
           ctx.rotate(-angle)
           ctx.fillStyle = '#e5e7eb'
           ctx.strokeStyle = iconColor
-          ctx.lineWidth = 2.5
+          ctx.lineWidth = Math.min(3.5, 2.5 * shellIconScale)
           ctx.beginPath()
           ctx.arc(0, 0, r, Math.PI, 0)
           ctx.closePath()
           ctx.fill()
           ctx.stroke()
           ctx.restore()
-          if (selectedIcons.includes(idx)) {
-            const handle = getGoalRotationHandlePos(ic)
+          if (selI.includes(idx)) {
+            const handle = getGoalRotationHandlePos(ic, r)
+            const handleR = Math.max(6, Math.round(6 * shellIconScale))
             ctx.fillStyle = '#9333ea'
             ctx.strokeStyle = '#fff'
             ctx.lineWidth = 2
             ctx.beginPath()
-            ctx.arc(handle.x, handle.y, 6, 0, Math.PI * 2)
+            ctx.arc(handle.x, handle.y, handleR, 0, Math.PI * 2)
             ctx.fill()
             ctx.stroke()
           }
         }
         ctx.restore()
+      })
+
       })
 
       if (teamLogo && teamLogoImgRef.current?.complete && teamLogoImgRef.current.naturalWidth) {
@@ -1190,28 +1559,76 @@ export default function HockeyBoard({
     if (creaseWithZonesSrc) imgCreaseWithZones.onload = draw
     if (blueToBlueSrc) imgBlueToBlue.onload = draw
     draw()
-  }, [paths, icons, selectedIcons, selectedPaths, extendingEndpoint, tool, selectionBox, canvasW, canvasH, fieldZone, teamLogo, fullSrc, halfAttackSrc, halfDefenseSrc, halfHorizontalSrc, quarterSrc, faceoffSrc, creaseSrc, creaseTopSrc, creaseWithZonesSrc, blueToBlueSrc])
+  }, [
+    paths,
+    icons,
+    selectedIcons,
+    selectedPaths,
+    extendingEndpoint,
+    tool,
+    selectionBox,
+    canvasW,
+    canvasH,
+    fieldZone,
+    teamLogo,
+    fullSrc,
+    halfAttackSrc,
+    halfDefenseSrc,
+    halfHorizontalSrc,
+    quarterSrc,
+    faceoffSrc,
+    creaseSrc,
+    creaseTopSrc,
+    creaseWithZonesSrc,
+    blueToBlueSrc,
+    layersRender,
+    pngExportLayerId,
+    pngExportAllLayers,
+    activeLayerId,
+    isMobileShellPortraitRotate,
+    shellIconScale
+  ])
 
   const handlePointerDown = (e) => {
     if (readOnly || !onChange) return
     if (e.pointerType === 'mouse' && e.button !== 0) return
-    e.preventDefault()
+    if (e.pointerType !== 'touch') {
+      e.preventDefault()
+    } else if (isMobileToolbar) {
+      e.preventDefault()
+    }
     try {
-      e.currentTarget.setPointerCapture(e.pointerId)
+      if (e.pointerType !== 'touch') {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }
     } catch (_) {}
     activePointerIdRef.current = e.pointerId
+    touchPointerCaptureSetRef.current = false
     handleMouseDown(e)
+    if (e.pointerType === 'touch' && touchCaptureAfterDownRef.current && canvasRef.current) {
+      touchCaptureAfterDownRef.current = false
+      try {
+        canvasRef.current.setPointerCapture(e.pointerId)
+        touchPointerCaptureSetRef.current = true
+      } catch (_) {}
+    }
   }
 
   const handlePointerUp = (e) => {
     if (activePointerIdRef.current === e.pointerId) activePointerIdRef.current = null
+    touchPointerCaptureSetRef.current = false
     handleMouseUp(e)
   }
 
   const handleMouseDown = (e) => {
-    e.preventDefault()
+    if ((e.pointerType ?? 'mouse') !== 'touch') {
+      e.preventDefault()
+    } else if (isMobileToolbar) {
+      e.preventDefault()
+    }
     if (readOnly || !onChange) return
     const coords = getCanvasCoords(e)
+    touchCaptureAfterDownRef.current = false
 
     const endpointHit = hitTestEndpoint(paths, coords)
     if (endpointHit && tool === 'select' && selectedPaths.length === 1 && selectedPaths[0] === endpointHit.pathIdx) {
@@ -1220,27 +1637,30 @@ export default function HockeyBoard({
       setSelectedIcons([])
       lastExtendPointRef.current = coords
       pushUndo()
+      if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
       return
     }
 
     if (tool === 'select' && selectedIcons.length === 1) {
       const ic = icons[selectedIcons[0]]
       if (ic?.type === 'goal') {
-        const onGoalBody = hitTestGoalIcon(ic, coords.x, coords.y)
-        const handle = getGoalRotationHandlePos(ic)
-        const onHandle = Math.hypot(coords.x - handle.x, coords.y - handle.y) < 12
+        const gR = GOAL_ICON_R * shellIconScale
+        const onGoalBody = hitTestGoalIcon(ic, coords.x, coords.y, gR)
+        const handle = getGoalRotationHandlePos(ic, gR)
+        const onHandle = Math.hypot(coords.x - handle.x, coords.y - handle.y) < 12 * shellIconScale
         if (onHandle && !onGoalBody) {
           pushUndo()
           const cursorAngle = Math.atan2(coords.y - ic.y, coords.x - ic.x)
           goalRotationStartRef.current = { angle: ic.angle || 0, cursorAngle }
           setRotatingGoalIdx(selectedIcons[0])
+          if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
           return
         }
       }
     }
 
     const hitIcon = icons.findIndex((ic, i) => {
-      if (hitTestIcon(ic, coords)) return true
+      if (hitTestIcon(ic, coords, shellIconScale)) return true
       return false
     })
     let hitIdx = -1
@@ -1252,18 +1672,22 @@ export default function HockeyBoard({
       if (hitIcon >= 0) {
         pushUndo()
         notifyChange(paths, icons.filter((_, i) => i !== hitIcon))
+        if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
         return
       }
       if (hitIdx >= 0) {
         pushUndo()
         notifyChange(paths.filter((_, i) => i !== hitIdx), icons)
+        if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
         return
       }
     }
 
     const hitKey = hitIcon >= 0 ? `i:${hitIcon}` : hitIdx >= 0 ? `p:${hitIdx}` : null
+    /** Тач: переключение в «Выбор» по удержанию, не по двойному касанию. */
+    const useTouchLongPressSelect = e.pointerType === 'touch'
 
-    /* Другой инструмент: двойной клик по объекту → «Выбор» + выделение. Храним id и координаты 1-го клика: после 1-го клика в массиве может появиться новый путь/иконка, индекс hit меняется. */
+    /* Другой инструмент: двойной клик по объекту → «Выбор» + выделение. Храним id и координаты 1-го клика: после 1-го клика в массиве может появиться новый путь/иконка, индекс hit меняется. На таче — удержание (см. таймер ниже). */
     if (tool !== 'select' && tool !== 'eraser' && hitKey) {
       const pr = pendingSelectRef.current
       const now = Date.now()
@@ -1275,8 +1699,11 @@ export default function HockeyBoard({
         distToPrev < SWITCH_TO_SELECT_PROXIMITY_PX &&
         (pr.iconId != null || pr.pathId != null)
       const isDouble =
-        (e.pointerType === 'mouse' && detailCount >= 2 && (hitKey || (pr && (pr.iconId != null || pr.pathId != null)))) ||
-        closeInTimeAndSpace
+        !useTouchLongPressSelect &&
+        (
+          (e.pointerType === 'mouse' && detailCount >= 2 && (hitKey || (pr && (pr.iconId != null || pr.pathId != null)))) ||
+          closeInTimeAndSpace
+        )
 
       const resolveTargetFromPending = () => {
         if (!pr) return { iconIdx: -1, pathIdx: -1 }
@@ -1333,12 +1760,59 @@ export default function HockeyBoard({
 
       const iconId = hitIcon >= 0 ? icons[hitIcon]?.id : null
       const pathId = hitIcon >= 0 || hitIdx < 0 ? null : paths[hitIdx]?.id
-      pendingSelectRef.current = {
-        x: coords.x,
-        y: coords.y,
-        t: now,
-        iconId: iconId ?? null,
-        pathId: pathId ?? null
+
+      if (useTouchLongPressSelect) {
+        pendingSelectRef.current = null
+        if (touchLongPressSelectTimerRef.current) {
+          clearTimeout(touchLongPressSelectTimerRef.current)
+          touchLongPressSelectTimerRef.current = null
+        }
+        longPressSelectFiredRef.current = false
+        const holdIconId = iconId ?? null
+        const holdPathId = pathId ?? null
+        const holdCoords = { x: coords.x, y: coords.y }
+        touchLongPressSelectTimerRef.current = setTimeout(() => {
+          touchLongPressSelectTimerRef.current = null
+          longPressSelectFiredRef.current = true
+          let iconIdx = -1
+          let pathIdx = -1
+          if (holdIconId != null) {
+            const i = iconsRef.current.findIndex(ic => ic.id === holdIconId)
+            if (i >= 0) iconIdx = i
+          }
+          if (iconIdx < 0 && holdPathId != null) {
+            const i = pathsRef.current.findIndex(p => p.id === holdPathId)
+            if (i >= 0) pathIdx = i
+          }
+          if (iconIdx < 0 && pathIdx < 0) return
+          discardDeferredPlacement()
+          touchDeferPlacementUntilPointerUpRef.current = false
+          deferredPlacementPayloadRef.current = null
+          setTool('select')
+          if (iconIdx >= 0) {
+            const ic = iconsRef.current[iconIdx]
+            if (!ic) return
+            setSelectedIcons([iconIdx])
+            setSelectedPaths([])
+            setDragOffset({ x: holdCoords.x - ic.x, y: holdCoords.y - ic.y })
+            selectMouseDownRef.current = holdCoords
+            hasPushedForDragRef.current = false
+            return
+          }
+          setSelectedPaths([pathIdx])
+          setSelectedIcons([])
+          setDragStart(holdCoords)
+          selectMouseDownRef.current = holdCoords
+          hasPushedForDragRef.current = false
+        }, SWITCH_TO_SELECT_LONG_PRESS_MS)
+      } else {
+        pendingSelectRef.current = {
+          x: coords.x,
+          y: coords.y,
+          t: now,
+          iconId: iconId ?? null,
+          pathId: pathId ?? null
+        }
       }
     } else if (tool !== 'select' && tool !== 'eraser') {
       pendingSelectRef.current = null
@@ -1352,6 +1826,15 @@ export default function HockeyBoard({
         deferredPlacementPayloadRef.current = null
         if (prevPayload) runDeferredPlacementFromPayload(prevPayload)
       }
+      if (touchDeferPlacementUntilPointerUpRef.current) {
+        if (touchLongPressSelectTimerRef.current) {
+          clearTimeout(touchLongPressSelectTimerRef.current)
+          touchLongPressSelectTimerRef.current = null
+        }
+        deferredPlacementPayloadRef.current = null
+        touchDeferPlacementUntilPointerUpRef.current = false
+        longPressSelectFiredRef.current = false
+      }
 
       const snapshot = {
         color,
@@ -1363,6 +1846,12 @@ export default function HockeyBoard({
         autoIndexByIconType: { ...autoIndexByIconType }
       }
       const placementPayload = { tool, coords: { x: coords.x, y: coords.y }, snapshot }
+
+      if (useTouchLongPressSelect && hitKey) {
+        deferredPlacementPayloadRef.current = placementPayload
+        touchDeferPlacementUntilPointerUpRef.current = true
+        return
+      }
 
       if (shouldDeferPlacement(tool, hitKey)) {
         deferredPlacementPayloadRef.current = placementPayload
@@ -1376,6 +1865,7 @@ export default function HockeyBoard({
       }
 
       runDeferredPlacementFromPayload(placementPayload)
+      if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
       return
     }
 
@@ -1392,6 +1882,7 @@ export default function HockeyBoard({
       setDragOffset({ x: coords.x - icons[hitIcon].x, y: coords.y - icons[hitIcon].y })
       selectMouseDownRef.current = coords
       hasPushedForDragRef.current = false
+      if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
       return
     }
     if (hitIdx >= 0) {
@@ -1405,6 +1896,7 @@ export default function HockeyBoard({
       setDragStart(coords)
       selectMouseDownRef.current = coords
       hasPushedForDragRef.current = false
+      if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
       return
     }
 
@@ -1414,19 +1906,54 @@ export default function HockeyBoard({
   }
 
   const handleMouseMove = (e) => {
-    if (isDrawing || selectedIcons.length > 0 || selectedPaths.length > 0 || extendingEndpoint || selectionBox || rotatingGoalIdx !== null) e.preventDefault()
+    if (e.pointerType === 'touch' && canvasRef.current && !touchPointerCaptureSetRef.current) {
+      const needsCapture =
+        isDrawingRef.current ||
+        isDrawing ||
+        selectedIcons.length > 0 ||
+        selectedPaths.length > 0 ||
+        extendingEndpoint ||
+        selectionBox ||
+        rotatingGoalIdx !== null
+      if (needsCapture) {
+        try {
+          canvasRef.current.setPointerCapture(e.pointerId)
+          touchPointerCaptureSetRef.current = true
+        } catch (_) {}
+      }
+    }
+    const blockScrollGesture =
+      isDrawingRef.current ||
+      isDrawing ||
+      selectedIcons.length > 0 ||
+      selectedPaths.length > 0 ||
+      extendingEndpoint ||
+      rotatingGoalIdx !== null ||
+      selectionBox
+    if (blockScrollGesture) e.preventDefault()
     const coords = getCanvasCoords(e)
 
-    if (deferredPlacementTimerRef.current && deferredPlacementPayloadRef.current && isPrimaryHeld(e)) {
-      const p = deferredPlacementPayloadRef.current
+    const defPayloadMove = deferredPlacementPayloadRef.current
+    const hasTimerDefMove = !!deferredPlacementTimerRef.current
+    const touchDeferMove = touchDeferPlacementUntilPointerUpRef.current
+    if (defPayloadMove && isPrimaryHeld(e) && (hasTimerDefMove || touchDeferMove)) {
+      const p = defPayloadMove
       if (isDeferredDrawingTool(p.tool)) {
         const d = Math.hypot(coords.x - p.coords.x, coords.y - p.coords.y)
         if (d > PLACEMENT_DEFER_MOVE_FLUSH_PX) {
-          clearTimeout(deferredPlacementTimerRef.current)
-          deferredPlacementTimerRef.current = null
-          const prev = deferredPlacementPayloadRef.current
+          if (hasTimerDefMove && deferredPlacementTimerRef.current) {
+            clearTimeout(deferredPlacementTimerRef.current)
+            deferredPlacementTimerRef.current = null
+          }
+          if (touchDeferMove) {
+            touchDeferPlacementUntilPointerUpRef.current = false
+            if (touchLongPressSelectTimerRef.current) {
+              clearTimeout(touchLongPressSelectTimerRef.current)
+              touchLongPressSelectTimerRef.current = null
+            }
+          }
           deferredPlacementPayloadRef.current = null
-          runDeferredPlacementFromPayload(prev)
+          runDeferredPlacementFromPayload(p)
         }
       }
     }
@@ -1547,7 +2074,7 @@ export default function HockeyBoard({
           : { ...last, type: 'circle', x1: start.x, y1: start.y, x2: coords.x, y2: coords.y, color, width: strokeWidth }
       notifyChange([...paths.slice(0, -1), newPath], icons)
     } else if (tool === 'eraser') {
-      const hitIcon = icons.findIndex(ic => hitTestIcon(ic, coords) || Math.hypot(coords.x - ic.x, coords.y - ic.y) < 18)
+      const hitIcon = icons.findIndex(ic => hitTestIcon(ic, coords, shellIconScale) || Math.hypot(coords.x - ic.x, coords.y - ic.y) < 18 * shellIconScale)
       if (hitIcon >= 0) {
         pushUndo()
         notifyChange(paths, icons.filter((_, i) => i !== hitIcon))
@@ -1579,6 +2106,23 @@ export default function HockeyBoard({
   }
 
   const handleMouseUp = (e) => {
+    if (touchDeferPlacementUntilPointerUpRef.current) {
+      const p = deferredPlacementPayloadRef.current
+      if (touchLongPressSelectTimerRef.current) {
+        clearTimeout(touchLongPressSelectTimerRef.current)
+        touchLongPressSelectTimerRef.current = null
+      }
+      const firedLongPress = longPressSelectFiredRef.current
+      touchDeferPlacementUntilPointerUpRef.current = false
+      deferredPlacementPayloadRef.current = null
+      longPressSelectFiredRef.current = false
+      pendingSelectRef.current = null
+      if (!firedLongPress && p) {
+        queueMicrotask(() => runDeferredPlacementFromPayload(p))
+      }
+      return
+    }
+
     if (rotatingGoalIdx !== null) {
       setRotatingGoalIdx(null)
       return
@@ -1590,7 +2134,7 @@ export default function HockeyBoard({
       const newPaths = []
       const newIcons = []
       paths.forEach((p, i) => { if (pathIntersectsRect(p, minX, minY, maxX, maxY)) newPaths.push(i) })
-      icons.forEach((ic, i) => { if (iconIntersectsRect(ic, minX, minY, maxX, maxY)) newIcons.push(i) })
+      icons.forEach((ic, i) => { if (iconIntersectsRect(ic, minX, minY, maxX, maxY, shellIconScale)) newIcons.push(i) })
       setSelectedPaths(newPaths)
       setSelectedIcons(newIcons)
       setSelectionBox(null)
@@ -1619,30 +2163,158 @@ export default function HockeyBoard({
     if (['pen', 'curve', 'lateral'].includes(tool) && isDrawing) {
       notifyChange(paths, icons)
     }
+    isDrawingRef.current = false
     setIsDrawing(false)
     setStart(null)
   }
 
-  const clearCanvas = () => {
-    if (confirm('Очистить всё?')) {
-      pushUndo()
-      notifyChange([], [])
-      setAutoIndexByIconType({ ...DEFAULT_AUTO_INDEX_BY_ICON_TYPE })
+  useEffect(() => {
+    if (!clearMenuOpen) return
+    const close = (e) => {
+      if (e.target.closest?.('.clear-menu-wrap')) return
+      setClearMenuOpen(false)
     }
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', close)
+    }
+  }, [clearMenuOpen])
+
+  const runClearSimple = () => {
+    if (!confirm('Очистить всё?')) return
+    pushUndo()
+    notifyChange([], [])
+    setAutoIndexByIconType({ ...DEFAULT_AUTO_INDEX_BY_ICON_TYPE })
   }
+
+  const runClearCurrentLayer = () => {
+    if (!confirm('Очистить текущий слой?')) return
+    pushUndo()
+    notifyChange([], [])
+    setAutoIndexByIconType({ ...DEFAULT_AUTO_INDEX_BY_ICON_TYPE })
+    setClearMenuOpen(false)
+  }
+
+  const runClearAllLayersAction = () => {
+    if (!confirm('Очистить все слои?')) return
+    onClearAllLayers?.()
+    setClearMenuOpen(false)
+  }
+
+  const renderClearToolbar = ({ iconOnly, className = '' }) => {
+    const btnCls = iconOnly ? 'btn-outline btn-icon-only' : 'btn-outline'
+    if (clearMenuWithLayers && typeof onClearAllLayers === 'function') {
+      return (
+        <div className={`clear-menu-wrap ${className}`} onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`${btnCls} clear-menu-trigger`}
+            onClick={() => setClearMenuOpen((v) => !v)}
+            title="Очистить"
+            aria-expanded={clearMenuOpen}
+            aria-haspopup="menu"
+          >
+            {iconOnly ? (
+              <>
+                <Trash2 size={18} strokeWidth={2} />
+                <ChevronDown size={14} strokeWidth={2} className={clearMenuOpen ? 'open' : undefined} aria-hidden />
+              </>
+            ) : (
+              <>
+                Очистить{' '}
+                <ChevronDown size={16} strokeWidth={2} className={clearMenuOpen ? 'open' : undefined} aria-hidden />
+              </>
+            )}
+          </button>
+          {clearMenuOpen && (
+            <div className="clear-menu-dropdown" role="menu">
+              <button type="button" role="menuitem" onClick={runClearCurrentLayer}>
+                Очистить текущий слой
+              </button>
+              <button type="button" role="menuitem" onClick={runClearAllLayersAction}>
+                Очистить все слои
+              </button>
+            </div>
+          )}
+        </div>
+      )
+    }
+    return (
+      <button
+        type="button"
+        className={`${btnCls} ${className}`}
+        onClick={runClearSimple}
+        title={iconOnly ? 'Очистить' : undefined}
+      >
+        {iconOnly ? <Trash2 size={18} strokeWidth={2} /> : 'Очистить'}
+      </button>
+    )
+  }
+
+  const downloadPngTitle =
+    Array.isArray(layersRender) && layersRender.length > 1
+      ? 'Скачать все слои в PNG'
+      : 'Скачать PNG'
 
   const downloadPng = async () => {
     const canvas = canvasRef.current
     if (!canvas) return
-    if (onDownloadPng) {
-      await onDownloadPng(canvas)
-      return
+    const multi =
+      Array.isArray(layersRender) &&
+      layersRender.length > 1 &&
+      activeLayerId != null &&
+      String(activeLayerId).length > 0
+    if (multi) {
+      setPngExportAllLayers(true)
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     }
-    const link = document.createElement('a')
-    link.download = `hockey-plan-${Date.now()}.png`
-    link.href = canvas.toDataURL('image/png')
-    link.click()
+    try {
+      if (onDownloadPng) {
+        await onDownloadPng(canvas)
+      } else {
+        const link = document.createElement('a')
+        link.download = `hockey-plan-${Date.now()}.png`
+        link.href = canvas.toDataURL('image/png')
+        link.click()
+      }
+    } finally {
+      if (multi) setPngExportAllLayers(false)
+    }
   }
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      downloadLayerPng: async (layerId) => {
+        const canvas = canvasRef.current
+        if (!canvas) return
+        setPngExportLayerId(String(layerId))
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+        try {
+          if (onDownloadPng) await onDownloadPng(canvas)
+          else {
+            const link = document.createElement('a')
+            link.download = `hockey-plan-${Date.now()}.png`
+            link.href = canvas.toDataURL('image/png')
+            link.click()
+          }
+        } finally {
+          setPngExportLayerId(null)
+        }
+      },
+      getCanvas: () => canvasRef.current
+    }),
+    [onDownloadPng]
+  )
+
+  useEffect(() => {
+    if (activeLayerId === undefined) return
+    historyRef.current = []
+    redoRef.current = []
+    setUndoable(false)
+    setRedoable(false)
+  }, [activeLayerId])
 
   const deleteSelected = () => {
     if (selectedIcons.length === 0 && selectedPaths.length === 0) return
@@ -1677,6 +2349,8 @@ export default function HockeyBoard({
     setTool('curve')
     setWaveMenuOpen(false)
     setNumberMenuOpen(false)
+    setPenMenuOpen(false)
+    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
   }
 
   const selectNumberDigit = (d) => {
@@ -1684,6 +2358,8 @@ export default function HockeyBoard({
     setTool('numbers')
     setNumberMenuOpen(false)
     setWaveMenuOpen(false)
+    setPenMenuOpen(false)
+    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
   }
 
   useEffect(() => {
@@ -1717,6 +2393,26 @@ export default function HockeyBoard({
   }, [numberMenuOpen])
 
   useEffect(() => {
+    if (!penMenuOpen) return
+    const close = () => setPenMenuOpen(false)
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => { clearTimeout(t); document.removeEventListener('click', close) }
+  }, [penMenuOpen])
+
+  useEffect(() => {
+    if (!mobileFolderOpen) return
+    const close = (e) => {
+      if (e.target.closest?.('.board-toolbar-mobile-folder-wrap')) return
+      setMobileFolderOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', close)
+    }
+  }, [mobileFolderOpen])
+
+  useEffect(() => {
     if (readOnly || !onChange) return
     const onKey = (e) => {
       const active = document.activeElement
@@ -1747,7 +2443,283 @@ export default function HockeyBoard({
     return () => window.removeEventListener('keydown', onKey)
   }, [readOnly, onChange, undo, redo, copySelected, pasteClipboard, deleteSelected, selectedIcons, selectedPaths])
 
+  const renderToolControl = (t) => {
+    const Icon = toolIcons[t.id]
+    if (t.id === 'pen') {
+      return (
+        <div key={t.id} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`tool-btn tool-btn--pen ${tool === t.id ? 'active' : ''}`}
+            onClick={() => {
+              setWaveMenuOpen(false)
+              setNumberMenuOpen(false)
+              setTool('pen')
+              setPenMenuOpen((v) => !v)
+            }}
+            title={t.label}
+          >
+            {Icon && <Icon />}
+            <ChevronDown size={14} strokeWidth={2} className={`tool-btn-pen-chevron${penMenuOpen ? ' open' : ''}`} aria-hidden />
+          </button>
+          {penMenuOpen && (
+            <div className="wave-style-dropdown wave-tool-menu pen-tool-menu">
+              <div className="wave-menu">
+                <label className="wave-direction-check">
+                  <input type="checkbox" checked={penArrowEnd} onChange={(e) => setPenArrowEnd(e.target.checked)} />
+                  <span>Стрелка на конце</span>
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (t.id === 'curve') {
+      return (
+        <div key={t.id} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`tool-btn ${tool === t.id ? 'active' : ''}`}
+            onClick={() => {
+              setNumberMenuOpen(false)
+              setPenMenuOpen(false)
+              setWaveMenuOpen((v) => !v)
+            }}
+            title={t.label}
+          >
+            {Icon && <Icon />}
+          </button>
+          {waveMenuOpen && (
+            <div className="wave-style-dropdown wave-tool-menu">
+              <div className="wave-menu">
+                {WAVE_STYLES.map((s) => (
+                  <button key={s.id} type="button" className={waveStyle === s.id ? 'active' : ''} onClick={() => selectCurveWithStyle(s.id)}>
+                    {s.label}
+                  </button>
+                ))}
+                <label className="wave-direction-check">
+                  <input type="checkbox" checked={waveDirection} onChange={(e) => setWaveDirection(e.target.checked)} />
+                  <span>Направление (стрелка)</span>
+                </label>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (t.id === 'numbers') {
+      return (
+        <div key={t.id} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`tool-btn tool-btn--numbers ${tool === 'numbers' ? 'active' : ''}`}
+            onClick={() => {
+              setWaveMenuOpen(false)
+              setPenMenuOpen(false)
+              setTool('numbers')
+              setNumberMenuOpen((v) => !v)
+            }}
+            title={`Цифра на поле: ${numberDigit}`}
+          >
+            <span className={`tool-btn-numbers-digit${numberDigit === 10 ? ' tool-btn-numbers-digit--wide' : ''}`}>{numberDigit}</span>
+            <ChevronDown size={14} strokeWidth={2} className="tool-btn-numbers-chevron" aria-hidden />
+          </button>
+          {numberMenuOpen && (
+            <div className="wave-style-dropdown wave-tool-menu numbers-tool-menu">
+              <div className="numbers-menu-grid">
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((d) => (
+                  <button key={d} type="button" className={numberDigit === d ? 'active' : ''} onClick={() => selectNumberDigit(d)}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+    return (
+      <button
+        key={t.id}
+        type="button"
+        className={`tool-btn ${tool === t.id ? 'active' : ''}`}
+        onClick={() => {
+          setTool(t.id)
+          setWaveMenuOpen(false)
+          setNumberMenuOpen(false)
+          setPenMenuOpen(false)
+          if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+        }}
+        title={t.label}
+      >
+        {Icon && <Icon />}
+      </button>
+    )
+  }
+
   const actionBtnsMobile = isMobileToolbar
+
+
+  const renderMobileShellTop = () => (
+              <div
+                className={`board-toolbar-mobile-shell-top${useMobileVideoToolbar || mobileToolbarChromeCenter ? ' board-toolbar-mobile-shell-top--three-cols' : ''}`}
+              >
+                <div className="board-toolbar-mobile-shell-top-left">
+                  {mobileToolbarChromeLeft}
+                  <div className="board-toolbar-mobile-folder-wrap">
+                    <button
+                      type="button"
+                      className={`board-toolbar-mobile-folder-trigger${mobileFolderOpen ? ' is-open' : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setMobileFolderOpen((v) => !v)
+                      }}
+                      aria-expanded={mobileFolderOpen}
+                      aria-haspopup="dialog"
+                      aria-label="Все инструменты"
+                      title="Инструменты"
+                    >
+                      <NineDotsMenuIcon size={22} />
+                    </button>
+                    {mobileFolderOpen && (
+                      <div
+                        className="board-toolbar-mobile-shell-folder-panel"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-label="Инструменты"
+                      >
+                        <div className="toolbar-section tools">
+                          <span className="toolbar-label">Инструменты</span>
+                          <div className="tool-buttons">
+                            {toolsForToolbar.filter((t) => MOBILE_SHELL_FOLDER_TOOL_IDS.has(t.id)).map((t) => (
+                              <Fragment key={t.id}>{renderToolControl(t)}</Fragment>
+                            ))}
+                          </div>
+                        </div>
+                        {!useMobileVideoToolbar && (
+                          <>
+                            <div className="toolbar-section colors">
+                              <span className="toolbar-label">Цвет</span>
+                              <div className="color-buttons">
+                                {COLORS.map((c) => (
+                                  <button
+                                    key={c.hex}
+                                    type="button"
+                                    className={`color-btn ${color === c.hex ? 'active' : ''}`}
+                                    style={{ background: c.hex }}
+                                    onClick={() => setColor(c.hex)}
+                                    title={c.name}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                            <div className="toolbar-section">
+                              <span className="toolbar-label">Толщина</span>
+                              <input
+                                type="range"
+                                min="1"
+                                max="8"
+                                value={strokeWidth}
+                                onChange={(e) => setStrokeWidth(Number(e.target.value))}
+                                className="stroke-slider board-toolbar-mobile-shell-folder-stroke"
+                              />
+                            </div>
+                          </>
+                        )}
+                        {toolbarRight && (
+                          <div className="toolbar-right board-toolbar-mobile-shell-folder-extras">{toolbarRight}</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {(useMobileVideoToolbar || mobileToolbarChromeCenter) && (
+                  <div className="board-toolbar-mobile-shell-top-center">
+                    {useMobileVideoToolbar && (
+                      <div ref={pencilMenuWrapRef} className="toolbar-pencil-menu-wrap">
+                        <button
+                          type="button"
+                          className={`toolbar-pencil-menu-trigger${pencilMenuOpen ? ' is-open' : ''}${color === '#ffffff' ? ' toolbar-pencil-menu-trigger--light' : ''}`}
+                          style={{ color: color === '#ffffff' ? '#64748b' : color }}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setPencilMenuOpen((v) => !v)
+                          }}
+                          title="Цвет и толщина линии"
+                          aria-expanded={pencilMenuOpen}
+                          aria-haspopup="dialog"
+                        >
+                          <Pencil
+                            size={22}
+                            strokeWidth={2.25}
+                            style={{ color: color === '#ffffff' ? '#64748b' : color }}
+                            fill="none"
+                            aria-hidden
+                          />
+                        </button>
+                        {pencilMenuOpen && (
+                          <div className="toolbar-pencil-menu-dropdown" role="dialog" aria-label="Цвет и толщина">
+                            <span className="toolbar-label">Цвет</span>
+                            <div className="color-buttons">
+                              {COLORS.map((c) => (
+                                <button
+                                  key={c.hex}
+                                  type="button"
+                                  className={`color-btn ${color === c.hex ? 'active' : ''}`}
+                                  style={{ background: c.hex }}
+                                  onClick={() => setColor(c.hex)}
+                                  title={c.name}
+                                />
+                              ))}
+                            </div>
+                            <span className="toolbar-label">Толщина</span>
+                            <input
+                              type="range"
+                              min="1"
+                              max="8"
+                              value={strokeWidth}
+                              onChange={(e) => setStrokeWidth(Number(e.target.value))}
+                              className="stroke-slider toolbar-pencil-stroke-slider"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {mobileToolbarChromeCenter}
+                  </div>
+                )}
+                <div className="board-toolbar-mobile-shell-top-right">{mobileToolbarChromeRight}</div>
+              </div>
+  )
+
+  const renderMobileShellBottomDock = () => (
+        <div ref={mobileShellBottomDockRef} className="board-toolbar-mobile-shell-bottom-dock">
+          <div className="board-toolbar-mobile-shell-bottom">
+            <div className="board-toolbar-mobile-shell-bottom-left">
+              <button type="button" className="btn-outline btn-icon-only" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">
+                <Undo2 size={18} strokeWidth={2} />
+              </button>
+              <button type="button" className="btn-outline btn-icon-only" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">
+                <Redo2 size={18} strokeWidth={2} />
+              </button>
+            </div>
+            <div className="board-toolbar-mobile-shell-bottom-center">
+              {['player', 'playerTriangle', 'puck'].map((id) => {
+                const t = toolsForToolbar.find((x) => x.id === id)
+                return t ? <Fragment key={id}>{renderToolControl(t)}</Fragment> : null
+              })}
+            </div>
+            <div className="board-toolbar-mobile-shell-bottom-right">
+              {renderClearToolbar({ iconOnly: true })}
+              {(() => {
+                const c = toolsForToolbar.find((x) => x.id === 'curve')
+                return c ? renderToolControl(c) : null
+              })()}
+            </div>
+          </div>
+        </div>
+  )
 
   const boardRootStyle =
     fitCanvasToContainer && !isMobileToolbar && !readOnly
@@ -1756,11 +2728,12 @@ export default function HockeyBoard({
 
   return (
     <div
-      className={`hockey-board${showMobileCollapsedToolbar ? ' hockey-board--mobile-collapsed' : ''}${useMobileVideoToolbar ? ' hockey-board--mobile-video-toolbar' : ''}`}
+      className={`hockey-board${showMobileCollapsedToolbar ? ' hockey-board--mobile-collapsed' : ''}${useMobileVideoToolbar ? ' hockey-board--mobile-video-toolbar' : ''}${mobileShellLayout && isMobileToolbar ? ' hockey-board--mobile-shell' : ''}`}
       style={boardRootStyle}
     >
       {!readOnly && (
         <>
+          {mobileShellLayout && isMobileToolbar && renderMobileShellTop()}
           {showMobileCollapsedToolbar && (
             <div ref={boardToolbarRef} className="board-toolbar board-toolbar-mobile-summary">
               <div className="board-toolbar-mobile-summary-row">
@@ -1782,11 +2755,9 @@ export default function HockeyBoard({
                   <button type="button" className="btn-outline btn-icon-only" onClick={pasteClipboard} title="Вставить (Ctrl+V)">
                     <ClipboardPaste size={18} strokeWidth={2} />
                   </button>
-                  <button type="button" className="btn-outline btn-icon-only" onClick={clearCanvas} title="Очистить">
-                    <Trash2 size={18} strokeWidth={2} />
-                  </button>
+                  {renderClearToolbar({ iconOnly: true })}
                   {canDownloadPng && (
-                    <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title="Скачать PNG">
+                    <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title={downloadPngTitle}>
                       <Download size={18} strokeWidth={2} />
                     </button>
                   )}
@@ -1795,7 +2766,7 @@ export default function HockeyBoard({
               </div>
             </div>
           )}
-          {(!isMobileToolbar || mobileToolsOpen || alwaysShowFullMobileToolbar) && (
+          {(!isMobileToolbar || mobileToolsOpen || alwaysShowFullMobileToolbar) && !(mobileShellLayout && isMobileToolbar) && (
         <div ref={boardToolbarRef} className="board-toolbar">
           {!isMobileToolbar && (
             <p className="board-toolbar-hint board-toolbar-hint--top">
@@ -1811,73 +2782,9 @@ export default function HockeyBoard({
           <div className="toolbar-section tools">
             <span className="toolbar-label">Инструменты</span>
             <div className="tool-buttons">
-              {TOOLS.map(t => {
-                const Icon = toolIcons[t.id]
-                if (t.id === 'curve') {
-                  return (
-                    <div key={t.id} className="tool-btn-wrap" onClick={e => e.stopPropagation()}>
-                      <button className={`tool-btn ${tool === t.id ? 'active' : ''}`} onClick={() => { setNumberMenuOpen(false); setWaveMenuOpen(v => !v) }} title={t.label}>
-                        {Icon && <Icon />}
-                      </button>
-                      {waveMenuOpen && (
-                        <div className="wave-style-dropdown wave-tool-menu">
-                          <div className="wave-menu">
-                            {WAVE_STYLES.map(s => (
-                              <button key={s.id} className={waveStyle === s.id ? 'active' : ''} onClick={() => selectCurveWithStyle(s.id)}>
-                                {s.label}
-                              </button>
-                            ))}
-                            <label className="wave-direction-check">
-                              <input type="checkbox" checked={waveDirection} onChange={e => setWaveDirection(e.target.checked)} />
-                              <span>Направление (стрелка)</span>
-                            </label>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                }
-                if (t.id === 'numbers') {
-                  return (
-                    <div key={t.id} className="tool-btn-wrap" onClick={e => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className={`tool-btn tool-btn--numbers ${tool === 'numbers' ? 'active' : ''}`}
-                        onClick={() => {
-                          setWaveMenuOpen(false)
-                          setTool('numbers')
-                          setNumberMenuOpen(v => !v)
-                        }}
-                        title={`Цифра на поле: ${numberDigit}`}
-                      >
-                        <span className={`tool-btn-numbers-digit${numberDigit === 10 ? ' tool-btn-numbers-digit--wide' : ''}`}>{numberDigit}</span>
-                        <ChevronDown size={14} strokeWidth={2} className="tool-btn-numbers-chevron" aria-hidden />
-                      </button>
-                      {numberMenuOpen && (
-                        <div className="wave-style-dropdown wave-tool-menu numbers-tool-menu">
-                          <div className="numbers-menu-grid">
-                            {Array.from({ length: 10 }, (_, i) => i + 1).map(d => (
-                              <button
-                                key={d}
-                                type="button"
-                                className={numberDigit === d ? 'active' : ''}
-                                onClick={() => selectNumberDigit(d)}
-                              >
-                                {d}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                }
-                return (
-                  <button key={t.id} className={`tool-btn ${tool === t.id ? 'active' : ''}`} onClick={() => { setTool(t.id); setWaveMenuOpen(false); setNumberMenuOpen(false) }} title={t.label}>
-                    {Icon && <Icon />}
-                  </button>
-                )
-              })}
+              {toolsForToolbar.map((t) => (
+                <Fragment key={t.id}>{renderToolControl(t)}</Fragment>
+              ))}
             </div>
           </div>
           {useMobileVideoToolbar ? (
@@ -1931,15 +2838,9 @@ export default function HockeyBoard({
                 )}
               </div>
               {toolbarRight && <div className="toolbar-right toolbar-right-mobile-video-icon">{toolbarRight}</div>}
-              <button
-                type="button"
-                className="btn-outline btn-icon-only toolbar-mobile-video-clear-btn"
-                onClick={clearCanvas}
-                title="Очистить доску"
-                aria-label="Очистить доску"
-              >
-                <Trash2 size={18} strokeWidth={2} />
-              </button>
+              <div className="toolbar-mobile-video-clear-btn">
+                {renderClearToolbar({ iconOnly: true })}
+              </div>
               {!readOnly &&
                 selectedIcons.length === 1 &&
                 ICON_TYPES_WITH_INDEX.includes(icons[selectedIcons[0]]?.type) && (
@@ -1986,19 +2887,11 @@ export default function HockeyBoard({
               </div>
             </>
           )}
-          {tool === 'pen' && (
-            <div className="toolbar-section">
-              <span className="toolbar-label">Карандаш</span>
-              <label className="wave-direction-check">
-                <input type="checkbox" checked={penArrowEnd} onChange={e => setPenArrowEnd(e.target.checked)} />
-                <span>Стрелка на конце</span>
-              </label>
-            </div>
-          )}
           {!readOnly &&
             selectedIcons.length === 1 &&
             ICON_TYPES_WITH_INDEX.includes(icons[selectedIcons[0]]?.type) &&
-            !useMobileVideoToolbar && (
+            !useMobileVideoToolbar &&
+            !showPlayerIndexPopover && (
               <div className="toolbar-section player-index-toolbar">
                 <span className="toolbar-label">Номер</span>
                 <button
@@ -2036,13 +2929,11 @@ export default function HockeyBoard({
                       <button type="button" className="btn-outline btn-icon-only" onClick={pasteClipboard} title="Вставить (Ctrl+V)">
                         <ClipboardPaste size={18} strokeWidth={2} />
                       </button>
-                      <button type="button" className="btn-outline btn-icon-only" onClick={clearCanvas} title="Очистить">
-                        <Trash2 size={18} strokeWidth={2} />
-                      </button>
+                      {renderClearToolbar({ iconOnly: true })}
                     </>
                   )}
                   {canDownloadPng && (
-                    <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title="Скачать PNG">
+                    <button type="button" className="btn-outline btn-icon-only" onClick={downloadPng} title={downloadPngTitle}>
                       <Download size={18} strokeWidth={2} />
                     </button>
                   )}
@@ -2052,9 +2943,9 @@ export default function HockeyBoard({
                   <button type="button" className="btn-outline" onClick={undo} disabled={!undoable} title="Отменить (Ctrl+Z)">↶ Отмена</button>
                   <button type="button" className="btn-outline" onClick={redo} disabled={!redoable} title="Повторить (Ctrl+Shift+Z)">↷ Повтор</button>
                   <button type="button" className="btn-outline" onClick={pasteClipboard} title="Вставить (Ctrl+V)">Вставить</button>
-                  <button type="button" className="btn-outline" onClick={clearCanvas}>Очистить</button>
+                  {renderClearToolbar({ iconOnly: false })}
                   {canDownloadPng && (
-                    <button type="button" className="btn-outline" onClick={downloadPng} title="Скачать рисунок в PNG">Скачать PNG</button>
+                    <button type="button" className="btn-outline" onClick={downloadPng} title={downloadPngTitle}>Скачать PNG</button>
                   )}
                 </>
               )}
@@ -2067,41 +2958,161 @@ export default function HockeyBoard({
       )}
       <div
         ref={fitCanvasToContainer ? boardCanvasWrapRef : undefined}
-        className={`board-canvas-wrap${fitCanvasToContainer ? ' board-canvas-wrap--fit-slot' : ''}`}
+        className={`board-canvas-wrap${fitCanvasToContainer ? ' board-canvas-wrap--fit-slot' : ''}${isMobileShellPortraitRotate ? ' board-canvas-wrap--mobile-shell-rotate' : ''}`}
         style={{ cursor: 'crosshair' }}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <canvas
-          ref={canvasRef}
-          id={canvasId}
-          width={canvasW}
-          height={canvasH}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handleMouseMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onLostPointerCapture={(e) => {
-            if (activePointerIdRef.current === e.pointerId) activePointerIdRef.current = null
-            handleMouseUp(e)
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-          draggable={false}
-          style={{
-            WebkitUserDrag: 'none',
-            userSelect: 'none',
-            touchAction: 'none',
-            ...(fitDisplaySize
-              ? {
+        {fitDisplaySize ? (
+          fitDisplaySize.shellRotatedLayout ? (
+            <div
+              className="board-canvas-display board-canvas-display--shell-rotated"
+              style={{
+                width: `${fitDisplaySize.h}px`,
+                height: `${fitDisplaySize.w}px`,
+                flexShrink: 0
+              }}
+            >
+              <canvas
+                ref={canvasRef}
+                id={canvasId}
+                width={canvasW}
+                height={canvasH}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handleMouseMove}
+                onPointerUp={handlePointerUp}
+                onPointerLeave={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onLostPointerCapture={(e) => {
+                  if (activePointerIdRef.current === e.pointerId) activePointerIdRef.current = null
+                  handleMouseUp(e)
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+                draggable={false}
+                style={{
+                  WebkitUserDrag: 'none',
+                  userSelect: 'none',
+                  touchAction: canvasTouchAction,
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
                   width: `${fitDisplaySize.w}px`,
                   height: `${fitDisplaySize.h}px`,
-                  maxWidth: 'none',
-                  maxHeight: 'none'
-                }
-              : {})
-          }}
-        />
+                  display: 'block',
+                  transform: 'translate(-50%, -50%) rotate(90deg)',
+                  transformOrigin: 'center center'
+                }}
+              />
+            </div>
+          ) : (
+            <div
+              className="board-canvas-display"
+              style={{
+                width: `${fitDisplaySize.w}px`,
+                height: `${fitDisplaySize.h}px`,
+                flexShrink: 0
+              }}
+            >
+              <canvas
+                ref={canvasRef}
+                id={canvasId}
+                width={canvasW}
+                height={canvasH}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handleMouseMove}
+                onPointerUp={handlePointerUp}
+                onPointerLeave={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onLostPointerCapture={(e) => {
+                  if (activePointerIdRef.current === e.pointerId) activePointerIdRef.current = null
+                  handleMouseUp(e)
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+                draggable={false}
+                style={{
+                  WebkitUserDrag: 'none',
+                  userSelect: 'none',
+                  touchAction: canvasTouchAction,
+                  width: '100%',
+                  height: '100%',
+                  display: 'block'
+                }}
+              />
+            </div>
+          )
+        ) : (
+          <canvas
+            ref={canvasRef}
+            id={canvasId}
+            width={canvasW}
+            height={canvasH}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handleMouseMove}
+            onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+            onLostPointerCapture={(e) => {
+              if (activePointerIdRef.current === e.pointerId) activePointerIdRef.current = null
+              handleMouseUp(e)
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+            draggable={false}
+            style={{
+              WebkitUserDrag: 'none',
+              userSelect: 'none',
+              touchAction: canvasTouchAction
+            }}
+          />
+        )}
       </div>
+      {!readOnly && mobileShellLayout && isMobileToolbar && renderMobileShellBottomDock()}
+      {showPlayerIndexPopover &&
+        mobilePlayerIndexPopoverPos &&
+        createPortal(
+          <div
+            ref={playerIndexPopoverRef}
+            className={`board-toolbar-mobile-shell-player-index board-toolbar-mobile-shell-player-index--popover board-toolbar-mobile-shell-player-index--popover-floating${playerIndexPopoverDragging ? ' is-dragging' : ''}`}
+            style={{ left: mobilePlayerIndexPopoverPos.left, top: mobilePlayerIndexPopoverPos.top }}
+            role="dialog"
+            aria-label="Номер игрока"
+          >
+            <div
+              className="board-toolbar-mobile-shell-player-index-drag-handle"
+              onPointerDown={onPlayerIndexPopoverHandlePointerDown}
+              onPointerMove={onPlayerIndexPopoverHandlePointerMove}
+              onPointerUp={onPlayerIndexPopoverHandlePointerUp}
+              onPointerCancel={onPlayerIndexPopoverHandlePointerUp}
+            >
+              <GripVertical size={16} strokeWidth={2} aria-hidden />
+              <span className="board-toolbar-mobile-shell-player-index-label">Номер</span>
+            </div>
+            <div className="board-toolbar-mobile-shell-player-index__body">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                className="player-index-input"
+                maxLength={3}
+                value={String(icons[selectedIcons[0]].num ?? '').replace(/\D/g, '').slice(0, 3)}
+                onChange={(e) => updateSelectedIconIndex(e.target.value)}
+                title="Цифры 0–9, до 3 знаков. Пусто — номер не показывается."
+                aria-label="Номер на схеме"
+              />
+              <button
+                type="button"
+                className="btn-outline btn-player-index-clear"
+                onClick={() => updateSelectedIconIndex('')}
+                title="Убрать номер со схемы"
+              >
+                Убрать
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   )
-}
+})
+
+HockeyBoard.displayName = 'HockeyBoard'
+
+export default HockeyBoard

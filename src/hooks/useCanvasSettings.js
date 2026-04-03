@@ -22,7 +22,7 @@ export function useCanvasSettings() {
   const [settings, setSettings] = useState(defaultSettings)
 
   useEffect(() => {
-    fetch('/api/pages/landing')
+    fetch('/api/pages/landing', { credentials: 'include' })
       .then(r => r.json())
       .then(pages => {
         setSettings({
