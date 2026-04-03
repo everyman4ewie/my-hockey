@@ -280,6 +280,32 @@
   opacity: 0.85;
 }
 
+.tool-btn--pen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 2.5rem;
+  padding-left: 6px;
+  padding-right: 4px;
+}
+
+.tool-btn-pen-chevron {
+  color: #64748b;
+  flex-shrink: 0;
+  opacity: 0.85;
+  transition: transform 0.2s;
+}
+
+.tool-btn--pen.active .tool-btn-pen-chevron {
+  color: rgba(255, 255, 255, 0.95);
+  opacity: 1;
+}
+
+.tool-btn-pen-chevron.open {
+  transform: rotate(180deg);
+}
+
 .numbers-tool-menu .numbers-menu-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -346,8 +372,7 @@
   color: #94a3b8;
 }
 
-/* pan-y: вертикальный скролл страницы/родителя по полям вокруг холста (padding, letterbox).
-   Рисование только на canvas — там touch-action: none в JSX. */
+/* Десктоп: pan-y. На узком экране — см. media ниже (none), иначе вертикальный жест уходит в скролл/PTR. */
 .board-canvas-wrap {
   padding: 1rem;
   overflow: hidden;
@@ -357,6 +382,13 @@
   user-select: none;
   -webkit-user-select: none;
   touch-action: pan-y;
+}
+
+@media (max-width: 768px) {
+  .hockey-board .board-canvas-wrap--fit-slot {
+    touch-action: none;
+    overscroll-behavior: none;
+  }
 }
 
 /* Тактическая доска: контейнер заполняет слот; размер холста задаётся измерением + max-* в JSX */
@@ -375,6 +407,32 @@
   justify-content: center;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+/* Размеры слоя = contain×множитель; холст 100%×100% — без конфликта с width:100%/height:auto у canvas */
+.board-canvas-wrap--fit-slot .board-canvas-display {
+  flex-shrink: 0;
+  position: relative;
+}
+
+.board-canvas-wrap--fit-slot .board-canvas-display canvas {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  min-width: 0;
+}
+
+/* Shell: обёртка = видимый AABB после rotate(90°), холст по центру — иначе layout по 800×400 «ломал» ширину льда */
+.board-canvas-wrap--fit-slot .board-canvas-display--shell-rotated {
+  overflow: hidden;
+}
+
+.board-canvas-wrap--fit-slot .board-canvas-display--shell-rotated canvas {
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
 }
 
 .board-canvas-wrap canvas {
@@ -681,6 +739,23 @@
   padding: 0;
   flex-shrink: 0;
   box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.toolbar-mobile-video-clear-btn .clear-menu-wrap {
+  width: 100%;
+  height: 100%;
+  justify-content: center;
+}
+
+.toolbar-mobile-video-clear-btn .clear-menu-trigger {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  justify-content: center;
 }
 
 /* Номер игрока в одной строке с иконками: справа от корзины — «Убрать», затем поле */
@@ -712,4 +787,463 @@
   max-width: 3.25rem;
   padding: 0.22rem 0.35rem;
   font-size: 0.8rem;
+}
+
+.clear-menu-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.clear-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.clear-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.25rem;
+  z-index: 130;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  min-width: 14rem;
+  padding: 0.25rem;
+}
+
+.clear-menu-dropdown button {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: #0f172a;
+  font-size: 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.clear-menu-dropdown button:hover {
+  background: #f1f5f9;
+}
+
+/* —— Мобильный shell: папка сверху, холст «портрет», игроки/шайба снизу —— */
+.hockey-board--mobile-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  border-radius: 0;
+  box-shadow: none;
+  border: none;
+  overflow: hidden;
+}
+
+.board-toolbar-mobile-shell-top {
+  display: grid;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.65rem;
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+  background: #1e293b;
+  color: #f8fafc;
+  flex-shrink: 0;
+  z-index: 100;
+  overflow: visible;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.board-toolbar-mobile-shell-top--three-cols {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.board-toolbar-mobile-shell-top-left {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  justify-self: start;
+  overflow: visible;
+}
+
+.board-toolbar-mobile-folder-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.board-toolbar-mobile-shell-top-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  justify-self: center;
+  min-width: 0;
+}
+
+.board-toolbar-mobile-shell-top-center .toolbar-pencil-menu-trigger {
+  border-color: #475569;
+  background: #334155;
+  color: #f8fafc;
+}
+
+.board-toolbar-mobile-shell-top-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  min-width: 0;
+  justify-self: end;
+}
+
+.board-toolbar-mobile-shell-top-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.board-toolbar-mobile-shell-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid #475569;
+  background: #334155;
+  color: #f8fafc;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.board-toolbar-mobile-shell-icon-btn:hover {
+  background: #475569;
+  border-color: #64748b;
+}
+
+.board-toolbar-mobile-shell-icon-btn--primary {
+  background: #0ea5e9;
+  border-color: #0284c7;
+  color: #fff;
+}
+
+.board-toolbar-mobile-shell-icon-btn--primary:hover:not(:disabled) {
+  background: #0284c7;
+  border-color: #0369a1;
+}
+
+.board-toolbar-mobile-shell-icon-btn--primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.board-toolbar-mobile-shell-icon-btn--outline {
+  background: transparent;
+  border-color: #64748b;
+  color: #f8fafc;
+}
+
+.board-toolbar-mobile-shell-icon-btn--outline:hover {
+  background: rgba(148, 163, 184, 0.15);
+  border-color: #94a3b8;
+}
+
+@keyframes board-toolbar-mobile-shell-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.board-toolbar-mobile-shell-icon-spin {
+  animation: board-toolbar-mobile-shell-spin 0.75s linear infinite;
+}
+
+.board-toolbar-mobile-shell-top-right .btn-primary,
+.board-toolbar-mobile-shell-top-right .btn-outline {
+  padding: 0.4rem 0.65rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.board-toolbar-mobile-folder-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 1px solid #475569;
+  border-radius: 10px;
+  background: #334155;
+  color: #f8fafc;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.board-toolbar-mobile-folder-trigger.is-open,
+.board-toolbar-mobile-folder-trigger:hover {
+  background: #475569;
+  border-color: #64748b;
+}
+
+/* Всплывающее меню у кнопки «папка» (как карандаш / волна), не отдельная строка под шапкой */
+/* Один блоковый скролл (без flex-колонки внутри): иначе тач-скролл на iOS часто не работает */
+.board-toolbar-mobile-shell-folder-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 200;
+  min-width: min(260px, calc(100vw - 1.25rem));
+  max-width: min(340px, calc(100vw - 1rem));
+  max-height: min(52vh, 340px);
+  padding: 0.65rem 0.75rem 0.85rem;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: manipulation;
+}
+
+.board-toolbar-mobile-shell-folder-panel > .toolbar-section + .toolbar-section,
+.board-toolbar-mobile-shell-folder-panel > .toolbar-section + .toolbar-right {
+  margin-top: 0.5rem;
+}
+
+.board-toolbar-mobile-shell-folder-panel .toolbar-section {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.board-toolbar-mobile-shell-folder-panel .toolbar-section.tools .tool-buttons {
+  max-width: 100%;
+}
+
+.board-toolbar-mobile-shell-folder-stroke {
+  touch-action: pan-x pinch-zoom;
+}
+
+.board-toolbar-mobile-shell-folder-extras {
+  margin-left: 0;
+  width: 100%;
+  margin-top: 0;
+}
+
+.board-canvas-wrap--mobile-shell-rotate {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-height: 0;
+  /* Слот под тактическую страницу (#e8f4fc); без тёмных полей по бокам при масштабе «на ширину» */
+  background: #e8f4fc;
+}
+
+/* Поворот при fit в shell задаётся в JSX (translate + rotate на canvas); здесь — только fallback без fit-слоя */
+.board-canvas-wrap--mobile-shell-rotate > canvas {
+  transform: rotate(90deg);
+  transform-origin: center center;
+}
+
+.board-toolbar-mobile-shell-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  padding-bottom: max(0.55rem, env(safe-area-inset-bottom, 0px));
+  background: #1e293b;
+  flex-shrink: 0;
+  z-index: 90;
+}
+
+.board-toolbar-mobile-shell-bottom-left,
+.board-toolbar-mobile-shell-bottom-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.board-toolbar-mobile-shell-bottom-center {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  background: #334155;
+  border-radius: 999px;
+  flex: 0 1 auto;
+  justify-content: center;
+  min-width: 0;
+}
+
+.board-toolbar-mobile-shell-bottom .tool-btn {
+  color: #e2e8f0;
+}
+
+.board-toolbar-mobile-shell-bottom .tool-btn:hover {
+  background: #475569;
+  color: #fff;
+}
+
+.board-toolbar-mobile-shell-bottom .tool-btn.active {
+  background: #0ea5e9;
+  color: #fff;
+}
+
+.board-toolbar-mobile-shell-bottom .btn-outline {
+  border-color: #475569;
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.board-toolbar-mobile-shell-bottom .btn-outline:hover:not(:disabled) {
+  background: #475569;
+  color: #fff;
+}
+
+.board-toolbar-mobile-shell-bottom .clear-menu-trigger {
+  border-color: #475569;
+  background: #334155;
+  color: #e2e8f0;
+}
+
+.board-toolbar-mobile-shell-bottom .clear-menu-dropdown {
+  top: auto;
+  bottom: 100%;
+  margin-top: 0;
+  margin-bottom: 0.25rem;
+  z-index: 200;
+}
+
+/* Волна «Движение» справа от «Удалить»: панель вверх, якорь по правому краю кнопки → раскрывается влево */
+.board-toolbar-mobile-shell-bottom .wave-tool-menu {
+  top: auto;
+  bottom: 100%;
+  left: auto;
+  right: 0;
+  margin-top: 0;
+  margin-bottom: 4px;
+  z-index: 200;
+}
+
+/* Якорь для нижней панели и всплывающего блока номера */
+.board-toolbar-mobile-shell-bottom-dock {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 120;
+}
+
+.board-toolbar-mobile-shell-player-index {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Всплывающая карточка при выборе игрока / нападающего / защитника (моб. shell: плавающая, перетаскиваемая) */
+.board-toolbar-mobile-shell-player-index--popover {
+  width: max-content;
+  min-width: 11rem;
+  max-width: min(20rem, calc(100vw - 1.25rem));
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.board-toolbar-mobile-shell-player-index--popover-floating {
+  position: fixed;
+  z-index: 10000;
+  margin: 0;
+}
+
+.board-toolbar-mobile-shell-player-index--popover-floating.is-dragging .board-toolbar-mobile-shell-player-index-drag-handle {
+  cursor: grabbing;
+}
+
+.board-toolbar-mobile-shell-player-index-drag-handle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.65rem;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  color: #64748b;
+}
+
+.board-toolbar-mobile-shell-player-index-drag-handle svg {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.board-toolbar-mobile-shell-player-index__body {
+  padding: 0.5rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.board-toolbar-mobile-shell-player-index-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.board-toolbar-mobile-shell-player-index--popover .board-toolbar-mobile-shell-player-index__body .player-index-input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+  padding: 0.45rem 0.5rem;
+  font-size: 1rem;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+
+.board-toolbar-mobile-shell-player-index--popover .board-toolbar-mobile-shell-player-index__body .btn-player-index-clear {
+  width: 100%;
+  justify-content: center;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.85rem;
+  border-radius: 8px;
+}
+
+.board-toolbar-mobile-shell-player-index .btn-player-index-clear {
+  padding: 0.35rem 0.5rem;
+  font-size: 0.8rem;
+}
+
+.board-toolbar-mobile-shell-player-index .player-index-input {
+  width: 3.25rem;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.9rem;
 }

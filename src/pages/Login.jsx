@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { httpErrorMessage, readResponseBody } from '../utils/httpErrorMessage'
 import './Auth.css'
 
 function safeRedirectPath(raw) {
@@ -27,17 +28,22 @@ export default function Login() {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ login, password })
       })
-      const data = await res.json()
+      const { text, parsed } = await readResponseBody(res)
+      const data = parsed && typeof parsed === 'object' ? parsed : {}
       if (!res.ok) {
         if (res.status === 403 && data.code === 'ACCOUNT_BLOCKED') {
           throw new Error(data.error || 'Аккаунт заблокирован')
         }
-        throw new Error(data.error || 'Ошибка входа')
+        throw new Error(httpErrorMessage(res, text, parsed))
       }
-      authLogin(data.user, data.token)
+      if (!data.user) {
+        throw new Error('Некорректный ответ сервера')
+      }
+      authLogin(data.user)
       if (afterAuthPath) {
         navigate(afterAuthPath)
       } else {
@@ -75,6 +81,13 @@ export default function Login() {
               required
             />
           </label>
+          <p className="auth-forgot-wrap">
+            <Link
+              to={afterAuthPath ? `/forgot-password?redirect=${encodeURIComponent(afterAuthPath)}` : '/forgot-password'}
+            >
+              Забыли пароль?
+            </Link>
+          </p>
           {error && <p className="auth-error">{error}</p>}
           <button type="submit" disabled={loading}>
             {loading ? 'Вход...' : 'Войти'}

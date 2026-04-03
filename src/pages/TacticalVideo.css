@@ -2,6 +2,70 @@
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
+.tactical-video-load-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0.75rem 12px;
+  padding: 10px 14px;
+  background: #fff8e6;
+  border: 1px solid #f59e0b;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: #78350f;
+}
+
+.tactical-board-page--mobile-shell .tactical-video-load-error {
+  margin: 8px 12px 12px;
+}
+
+.tactical-video-load-error-text {
+  flex: 1;
+  min-width: 12rem;
+}
+
+.tactical-board-page--mobile-shell .tactical-video-keyframe-btn {
+  display: none !important;
+}
+
+.tactical-video-frame-shell-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 1px solid #475569;
+  border-radius: 10px;
+  background: #334155;
+  color: #f8fafc;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.tactical-video-frame-shell-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.tactical-video-shell-top-icon {
+  border-color: #475569 !important;
+  background: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+.tactical-video-shell-top-icon:hover:not(:disabled) {
+  background: #475569 !important;
+  color: #fff !important;
+}
+
+.btn-tactical-shell-cabinet {
+  font-size: 0.78rem;
+  padding: 0.4rem 0.55rem;
+  white-space: nowrap;
+}
+
 .tactical-video-header {
   flex-wrap: wrap;
   align-items: flex-start;
@@ -125,7 +189,7 @@
     gap: 0.45rem;
   }
 
-  .tactical-video-story-row,
+  .tactical-video-story-row, 
   .tactical-video-play-row {
     gap: 0.4rem;
   }
@@ -284,6 +348,7 @@
   .tactical-video-play-row .tactical-video-segment-label {
     flex-wrap: nowrap;
   }
+
 }
 
 .tactical-video-speed-value {

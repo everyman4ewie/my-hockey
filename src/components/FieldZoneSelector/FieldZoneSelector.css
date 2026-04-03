@@ -76,7 +76,42 @@
   background: #9a3d07;
 }
 
-.field-zone-option svg {
+.field-zone-option.field-zone-option--locked {
+  cursor: not-allowed;
+  color: #64748b;
+  background: #f8fafc;
+}
+
+.field-zone-option.field-zone-option--locked:hover {
+  background: #f1f5f9;
+}
+
+.field-zone-option.field-zone-option--locked.selected {
+  background: #cbd5e1;
+  color: #334155;
+}
+
+.field-zone-option.field-zone-option--locked.selected:hover {
+  background: #94a3b8;
+}
+
+.field-zone-option-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-zone-option-suffix {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   flex-shrink: 0;
   margin-left: 0.5rem;
+}
+
+.field-zone-lock-icon {
+  opacity: 0.75;
+}
+
+.field-zone-option-suffix svg {
+  flex-shrink: 0;
 }

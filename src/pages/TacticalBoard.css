@@ -109,6 +109,47 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
 }
 
+.tactical-board-folder-video-link {
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.4rem 0.65rem;
+  border-radius: 8px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* Мобильный shell: фиксируем только корень страницы (без overflow/position на html и body — иначе ломается скролл на остальных маршрутах) */
+.tactical-board-page--mobile-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overscroll-behavior: none;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/* Один ряд grid: шапка не рендерится — иначе пустая первая строка давала высоту 0 у холста */
+.tactical-board-page--mobile-shell:not(.tactical-video-page) {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.tactical-board-page--mobile-shell.tactical-video-page {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.tactical-board-mobile-error {
+  flex-shrink: 0;
+  padding: 0.5rem 1rem;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 0.875rem;
+  border-bottom: 1px solid #fecaca;
+}
+
 @media (max-width: 768px) {
   .tactical-board-canvas-wrap .hockey-board {
     padding-top: 0;
@@ -156,4 +197,135 @@
   background: #e8f4fc;
   padding: 0;
   box-sizing: border-box;
+}
+
+.tactical-toolbar-right-cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 0.75rem;
+}
+
+/* Каталог сверху; ниже — слои и площадка в одном ряду */
+.tactical-toolbar-field-zone-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.45rem;
+}
+
+.tactical-toolbar-field-zone-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 0.5rem 0.75rem;
+  width: 100%;
+}
+
+.tactical-toolbar-field-zone-row .field-zone-select-wrap {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tactical-board-catalog-row {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+}
+
+.tactical-board-catalog-btn {
+  font-size: 0.88rem;
+  white-space: nowrap;
+}
+
+.tactical-layer-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: min(52vw, 14rem);
+}
+
+.tactical-layer-trigger-text {
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tactical-layer-trigger-prefix {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.tactical-layer-trigger-current {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.tactical-layers-dropdown {
+  min-width: 15rem;
+}
+
+.tactical-layer-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.15rem;
+}
+
+.tactical-layer-row .tactical-layer-option {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+}
+
+.tactical-layer-name {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tactical-layer-png-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.4rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.tactical-layer-png-btn:hover {
+  background: rgba(2, 132, 199, 0.1);
+  color: #0369a1;
+}
+
+.tactical-layer-delete-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.35rem;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+}
+
+.tactical-layer-delete-btn:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}
+
+.tactical-layer-new {
+  border-top: 1px solid rgba(2, 132, 199, 0.15);
+  margin-top: 0.25rem;
+  padding-top: 0.65rem;
+  font-weight: 500;
 }

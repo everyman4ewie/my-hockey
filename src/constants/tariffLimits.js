@@ -6,7 +6,7 @@ import { normalizeTariffId } from './tariffs'
 
 export const TARIFF_LIMITS = {
   free: {
-    maxPlans: -1,
+    maxPlansPerMonth: 3,
     maxPdfDownloads: -1,
     maxWordDownloads: 0,
     maxBoardDownloads: -1,
@@ -16,7 +16,7 @@ export const TARIFF_LIMITS = {
     canSaveDownloadTacticalVideo: false
   },
   pro: {
-    maxPlans: -1,
+    maxPlansPerMonth: -1,
     maxPdfDownloads: -1,
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
@@ -26,7 +26,7 @@ export const TARIFF_LIMITS = {
     canSaveDownloadTacticalVideo: false
   },
   pro_plus: {
-    maxPlans: -1,
+    maxPlansPerMonth: -1,
     maxPdfDownloads: -1,
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
@@ -36,7 +36,7 @@ export const TARIFF_LIMITS = {
     canSaveDownloadTacticalVideo: true
   },
   admin: {
-    maxPlans: -1,
+    maxPlansPerMonth: -1,
     maxPdfDownloads: -1,
     maxWordDownloads: -1,
     maxBoardDownloads: -1,
@@ -57,8 +57,9 @@ export function canPerform(tariffId, action, usage) {
   const u = usage || {}
   switch (action) {
     case 'createPlan':
-      if (limits.maxPlans < 0) return true
-      return (u.plansCreated || 0) < limits.maxPlans
+      if (limits.maxPlansPerMonth < 0) return true
+      // /api/user/profile отдаёт plansCreatedThisMonth за текущий месяц
+      return (u.plansCreatedThisMonth || 0) < limits.maxPlansPerMonth
     case 'downloadPdf':
       if (limits.maxPdfDownloads < 0) return true
       return (u.pdfDownloads || 0) < limits.maxPdfDownloads
@@ -86,7 +87,7 @@ export function canPerform(tariffId, action, usage) {
 export function getLimitLabel(tariffId, action) {
   const limits = getTariffLimits(tariffId)
   switch (action) {
-    case 'createPlan': return limits.maxPlans < 0 ? null : limits.maxPlans
+    case 'createPlan': return limits.maxPlansPerMonth < 0 ? null : limits.maxPlansPerMonth
     case 'downloadPdf': return limits.maxPdfDownloads < 0 ? null : limits.maxPdfDownloads
     case 'downloadWord': return limits.maxWordDownloads < 0 ? null : limits.maxWordDownloads
     case 'downloadBoard': return limits.maxBoardDownloads < 0 ? null : limits.maxBoardDownloads

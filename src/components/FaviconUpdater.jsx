@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 
 export default function FaviconUpdater() {
   useEffect(() => {
-    fetch('/api/pages/landing')
+    fetch('/api/pages/landing', { credentials: 'include' })
       .then(r => r.json())
       .then(pages => {
         const faviconUrl = pages?.faviconUrl

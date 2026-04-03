@@ -6,13 +6,23 @@ export const TARIFF_IDS = {
   ADMIN: 'admin'
 }
 
-/** Старые id в данных → для лимитов */
-export function normalizeTariffIdForLimits(id) {
-  if (!id || id === 'free') return 'free'
-  if (id === 'admin' || id === 'ultima') return 'admin'
-  if (id === 'pro_plus') return 'pro_plus'
-  if (id === 'pro') return 'pro'
+/**
+ * Приводит значение тарифа из БД/админки к одному из: free | pro | pro_plus | admin.
+ * Учитывает регистр, пробелы и частые варианты записи (старые данные, ручной ввод).
+ */
+export function normalizeStoredTariffId(raw) {
+  if (raw == null || raw === '') return 'free'
+  const s = String(raw).trim().toLowerCase()
+  if (s === 'free' || s === 'бесплатный') return 'free'
+  if (s === 'pro' || s === 'про') return 'pro'
+  if (s === 'pro_plus' || s === 'pro-plus' || s === 'proplus' || s === 'про+') return 'pro_plus'
+  if (s === 'admin' || s === 'ultima') return 'admin'
   return 'free'
+}
+
+/** Алиас: лимиты и политики считают по нормализованному id */
+export function normalizeTariffIdForLimits(id) {
+  return normalizeStoredTariffId(id)
 }
 
 export const TARIFFS = [
@@ -80,9 +90,10 @@ export const TARIFFS = [
 ]
 
 export function getTariffById(id) {
-  if (!id || id === 'free') return TARIFFS.find(t => t.id === 'free')
-  if (id === 'admin' || id === 'ultima') return TARIFFS.find(t => t.id === 'admin')
-  if (id === 'pro_plus') return TARIFFS.find(t => t.id === 'pro_plus')
-  if (id === 'pro') return TARIFFS.find(t => t.id === 'pro')
+  const n = normalizeStoredTariffId(id)
+  if (n === 'free') return TARIFFS.find(t => t.id === 'free')
+  if (n === 'admin') return TARIFFS.find(t => t.id === 'admin')
+  if (n === 'pro_plus') return TARIFFS.find(t => t.id === 'pro_plus')
+  if (n === 'pro') return TARIFFS.find(t => t.id === 'pro')
   return TARIFFS.find(t => t.id === 'free')
 }

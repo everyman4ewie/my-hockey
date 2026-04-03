@@ -159,6 +159,31 @@ export const BarrierIcon = () => (
   </svg>
 )
 
+/** Девять точек 3×3 (как «лаунчер»): кнопка меню всех инструментов в мобильном shell. */
+export function NineDotsMenuIcon({ size = 22, className, ...rest }) {
+  const dotR = 2
+  const step = 6
+  const start = 6
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={className}
+      aria-hidden
+      {...rest}
+    >
+      {[0, 1, 2].flatMap((row) =>
+        [0, 1, 2].map((col) => (
+          <circle key={`${row}-${col}`} cx={start + col * step} cy={start + row * step} r={dotR} />
+        ))
+      )}
+    </svg>
+  )
+}
+
 export const toolIcons = {
   select: SelectIcon,
   pen: PenIcon,

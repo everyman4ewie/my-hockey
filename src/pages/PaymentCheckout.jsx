@@ -25,6 +25,7 @@ export default function PaymentCheckout() {
     setLoading(true)
     try {
       const res = await fetch('/api/payments/yookassa/create', {
+        credentials: 'include',
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

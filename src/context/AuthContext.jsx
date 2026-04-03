@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { apiFetch } from '../utils/apiFetch'
 
 const AuthContext = createContext(null)
 
@@ -6,26 +7,48 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  const getToken = useCallback(() => localStorage.getItem('hockey_token'), [])
+  /** Совместимость: токен в httpOnly-cookie; заголовок не нужен, если cookie есть. */
+  const getToken = useCallback(() => localStorage.getItem('hockey_token') || '', [])
 
   useEffect(() => {
-    const stored = localStorage.getItem('hockey_user')
-    const token = localStorage.getItem('hockey_token')
-    if (stored && token) {
+    let cancelled = false
+    ;(async () => {
       try {
-        setUser(JSON.parse(stored))
-      } catch (_) {
-        localStorage.removeItem('hockey_user')
-        localStorage.removeItem('hockey_token')
-      }
+        const res = await apiFetch('/api/auth/session')
+        if (cancelled) return
+        if (res.ok) {
+          const data = await res.json().catch(() => ({}))
+          if (data.user) {
+            setUser(data.user)
+            try {
+              localStorage.setItem('hockey_user', JSON.stringify(data.user))
+              localStorage.removeItem('hockey_token')
+            } catch (_) {}
+            setLoading(false)
+            return
+          }
+        }
+        if (res.status === 401 || res.status === 403) {
+          try {
+            localStorage.removeItem('hockey_user')
+          } catch (_) {}
+        }
+      } catch (_) {}
+      setLoading(false)
+    })()
+    return () => {
+      cancelled = true
     }
-    setLoading(false)
   }, [])
 
-  const login = (userData, token) => {
+  const login = (userData) => {
     setUser(userData)
-    localStorage.setItem('hockey_user', JSON.stringify(userData))
-    localStorage.setItem('hockey_token', token)
+    try {
+      localStorage.setItem('hockey_user', JSON.stringify(userData))
+    } catch (_) {}
+    try {
+      localStorage.removeItem('hockey_token')
+    } catch (_) {}
   }
 
   const logout = () => {
@@ -33,6 +56,7 @@ export function AuthProvider({ children }) {
     setUser(null)
     localStorage.removeItem('hockey_user')
     localStorage.removeItem('hockey_token')
+    apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
     if (uid) {
       try {
         localStorage.removeItem(`hockey-plan-create-draft-${uid}`)
@@ -42,7 +66,7 @@ export function AuthProvider({ children }) {
   }
 
   const updateUser = useCallback((updates) => {
-    setUser(prev => prev ? { ...prev, ...updates } : null)
+    setUser((prev) => (prev ? { ...prev, ...updates } : null))
     const stored = localStorage.getItem('hockey_user')
     if (stored) {
       try {

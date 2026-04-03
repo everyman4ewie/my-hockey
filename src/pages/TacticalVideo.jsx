@@ -1,28 +1,37 @@
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import { flushSync } from 'react-dom'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { ChevronDown, Check, Play, Square, Download, Save, Loader2, Camera, LayoutGrid } from 'lucide-react'
+import { authFetch } from '../utils/authFetch'
+import { useAuthFetchOpts } from '../hooks/useAuthFetchOpts'
+import { ChevronDown, Check, Play, Square, Download, Save, Loader2, Camera, LayoutGrid, Lock } from 'lucide-react'
 import HockeyBoard from '../components/HockeyBoard/HockeyBoard'
 import { useProfile } from '../hooks/useProfile'
 import { useCanvasSettings } from '../hooks/useCanvasSettings'
+import { useMediaQuery } from '../hooks/useMediaQuery'
 import { assignMissingEntityIds } from '../utils/boardEntityId'
 import { interpolateBoardFrames, interpolateKeyframesAtMs } from '../utils/boardVideoInterpolation'
 import {
   recordCanvasAnimation,
-  convertVideoBlobToMp4,
   guessRecorderInputExtension,
-  triggerBlobDownload
+  triggerBlobDownload,
+  ensurePlayableMp4Blob
 } from '../utils/tacticalVideoExport'
 import {
   migrateBoardToNormalized,
+  flattenBoardLayers,
   normalizePaths,
   normalizeIcons,
   denormalizePaths,
   denormalizeIcons
 } from '../utils/boardCoordinates'
+import { FIELD_OPTIONS } from '../components/FieldZoneSelector/FieldZoneSelector'
+import { isFieldZoneLockedForTariff, FIELD_ZONE_UPGRADE_TOOLTIP } from '../constants/fieldZones'
+import { getTariffLimits } from '../constants/tariffLimits'
 import '../components/FieldZoneSelector/FieldZoneSelector.css'
 import TariffLimitModal from '../components/TariffLimitModal/TariffLimitModal'
+import { openLibraryOrWarn } from '../utils/libraryDesktopOnly'
+import { LIBRARY_BOARD_IMPORT_KEY } from '../utils/libraryBoardImport'
 import './TacticalBoard.css'
 import './TacticalVideo.css'
 
@@ -31,20 +40,6 @@ const MSG_DEFAULT = 'Операция недоступна по тарифу. О
 const RINK_IMG = '/assets/hockey-rink.png'
 
 const getVideoDraftKey = (userId) => `tactical-video-draft-${userId || 'anon'}`
-
-const FIELD_OPTIONS = [
-  { id: 'full', label: 'Полная площадка' },
-  { id: 'halfAttack', label: 'Полплощадки (атака)' },
-  { id: 'halfDefense', label: 'Полплощадки (оборона)' },
-  { id: 'halfHorizontal', label: 'Полплощадки (по горизонтали)' },
-  { id: 'quarter', label: '1/4 площадки' },
-  { id: 'faceoff', label: 'Зона вбрасывания' },
-  { id: 'crease', label: 'Вратарская зона' },
-  { id: 'creaseTop', label: 'Вратарская (сверху)' },
-  { id: 'creaseWithZones', label: 'Вратарская с зонами' },
-  { id: 'blueToBlue', label: 'От синей линии до синей линии' },
-  { id: 'clean', label: 'Чистый фон' }
-]
 
 function stripOpacityFromBoard(paths, icons) {
   const pathsClean = (paths || []).map((p) => {
@@ -87,8 +82,10 @@ function segmentSecToPlaybackSpeed(segmentSec) {
 
 export default function TacticalVideo() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
-  const { getToken, user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
+  const authFetchOpts = useAuthFetchOpts()
   const { profile, refreshProfile } = useProfile()
   const { canvasBackgrounds, canvasSize: canvasSizeSettings } = useCanvasSettings()
   const headerRef = useRef(null)
@@ -116,10 +113,17 @@ export default function TacticalVideo() {
   const [videoTitle, setVideoTitle] = useState('Видео с доски')
   const [editingVideoId, setEditingVideoId] = useState(null)
   const [cabinetSaveHint, setCabinetSaveHint] = useState('')
+  const [videoLoadError, setVideoLoadError] = useState(null)
+  const [videoLoadRetryKey, setVideoLoadRetryKey] = useState(0)
   const [tvLimits, setTvLimits] = useState(null)
   const [tariffModalOpen, setTariffModalOpen] = useState(false)
   const [tariffModalMessage, setTariffModalMessage] = useState('')
   const [videoReadOnly, setVideoReadOnly] = useState(false)
+
+  const isMobileShell = useMediaQuery('(max-width: 768px)')
+  const storyBarRef = useRef(null)
+  const frameLongPressTimerRef = useRef(null)
+  const suppressFrameTapRef = useRef(false)
 
   /** Длительность одного перехода (сек.); для API и интерполяции — обратная величина к «скорости». */
   const segmentSec = useMemo(() => {
@@ -128,8 +132,7 @@ export default function TacticalVideo() {
   }, [playbackSpeed])
 
   const loadTvLimits = useCallback(() => {
-    if (!getToken) return
-    if (user?.isAdmin) {
+    if (user?.isAdmin && authFetchOpts.viewAs == null) {
       setTvLimits({
         tariff: 'admin',
         autoSaveOnDownload: true,
@@ -141,11 +144,14 @@ export default function TacticalVideo() {
       return
     }
     if (!user?.id) return
-    fetch('/api/user/tactical-video/limits', { headers: { Authorization: getToken() } })
-      .then((r) => r.json())
+    authFetch('/api/user/tactical-video/limits', { ...authFetchOpts })
+      .then(async (r) => {
+        if (!r.ok) throw new Error('limits_http')
+        return r.json()
+      })
       .then(setTvLimits)
       .catch(() => setTvLimits(null))
-  }, [getToken, user?.id, user?.isAdmin])
+  }, [user?.id, user?.isAdmin, authFetchOpts])
 
   useEffect(() => {
     loadTvLimits()
@@ -154,6 +160,46 @@ export default function TacticalVideo() {
   useEffect(() => {
     if (!user?.id) return
     try {
+      if (!videoIdParam && !fromBoardId) {
+        const libRaw = sessionStorage.getItem(LIBRARY_BOARD_IMPORT_KEY)
+        if (libRaw) {
+          sessionStorage.removeItem(LIBRARY_BOARD_IMPORT_KEY)
+          const parsed = JSON.parse(libRaw)
+          const cw = parsed.canvasWidth || 800
+          const ch = parsed.canvasHeight || 400
+          const m = migrateBoardToNormalized({
+            layers: parsed.layers,
+            activeLayerId: parsed.activeLayerId,
+            canvasWidth: cw,
+            canvasHeight: ch,
+            coordSpace: parsed.coordSpace || 'normalized'
+          })
+          let paths = []
+          let icons = []
+          if (m.layers && m.layers.length > 0) {
+            const flat = flattenBoardLayers(m.layers)
+            paths = flat.paths || []
+            icons = flat.icons || []
+          } else {
+            paths = m.paths || []
+            icons = m.icons || []
+          }
+          const ids = assignMissingEntityIds(paths, icons)
+          setPaths(ids.paths)
+          setIcons(ids.icons)
+          const fz =
+            parsed.fieldZone && FIELD_OPTIONS.some((o) => o.id === parsed.fieldZone) ? parsed.fieldZone : 'full'
+          setFieldZone(fz)
+          setKeyframes([
+            {
+              paths: JSON.parse(JSON.stringify(ids.paths)),
+              icons: JSON.parse(JSON.stringify(ids.icons)),
+              fieldZone: fz
+            }
+          ])
+          return
+        }
+      }
       const draft = localStorage.getItem(getVideoDraftKey(user.id))
       if (draft && !fromBoardId && !videoIdParam) {
         const parsed = JSON.parse(draft)
@@ -181,22 +227,43 @@ export default function TacticalVideo() {
   }, [user?.id, fromBoardId, videoIdParam])
 
   useEffect(() => {
-    if (!videoIdParam || !getToken) {
+    if (authLoading) return
+    if (!videoIdParam || !user?.id) {
       if (!videoIdParam) {
         loadedServerVideoIdRef.current = null
         setEditingVideoId(null)
         setVideoReadOnly(false)
       }
+      setVideoLoadError(null)
       return
     }
     const vid = videoIdParam
     if (loadedServerVideoIdRef.current === vid) return
-    fetch(`/api/user/videos/${vid}`, { headers: { Authorization: getToken() } })
+    let cancelled = false
+    setVideoLoadError(null)
+    authFetch(`/api/user/videos/${vid}`, { ...authFetchOpts })
       .then(async (r) => {
-        if (!r.ok) throw new Error()
+        if (cancelled) return null
+        if (r.status === 401) {
+          loadedServerVideoIdRef.current = null
+          setVideoLoadError('Сессия истекла или вы не авторизованы. Обновите страницу и войдите снова.')
+          return null
+        }
+        if (r.status === 404) {
+          loadedServerVideoIdRef.current = null
+          setVideoLoadError('Видео не найдено.')
+          return null
+        }
+        if (!r.ok) {
+          loadedServerVideoIdRef.current = null
+          const errData = await r.json().catch(() => ({}))
+          setVideoLoadError(errData.error || `Не удалось загрузить видео (${r.status})`)
+          return null
+        }
         return r.json()
       })
       .then((v) => {
+        if (cancelled || !v) return
         loadedServerVideoIdRef.current = vid
         setEditingVideoId(v.id)
         setVideoReadOnly(!!v.readonly)
@@ -224,23 +291,33 @@ export default function TacticalVideo() {
         }
       })
       .catch((e) => {
-        if (e?.message === 'no-access') return
-        navigate(user?.isAdmin ? '/admin' : '/cabinet?section=videos', { replace: true })
+        if (cancelled || e?.message === 'no-access') return
+        loadedServerVideoIdRef.current = null
+        setVideoLoadError(e?.message || 'Не удалось загрузить видео')
       })
-  }, [videoIdParam, getToken, navigate, user?.isAdmin])
+    return () => {
+      cancelled = true
+    }
+  }, [videoIdParam, user?.id, authLoading, navigate, user?.isAdmin, authFetchOpts, videoLoadRetryKey])
 
   useEffect(() => {
-    if (!fromBoardId || !getToken) return
-    fetch(`/api/boards/${fromBoardId}`, { headers: { Authorization: getToken() } })
+    if (!fromBoardId || !user?.id) return
+    authFetch(`/api/boards/${fromBoardId}`, { ...authFetchOpts })
       .then(r => { if (!r.ok) throw new Error(); return r.json() })
       .then(board => {
         const m = migrateBoardToNormalized(board)
-        setPaths(Array.isArray(m.paths) ? m.paths : [])
-        setIcons(Array.isArray(m.icons) ? m.icons : [])
+        if (m.layers && m.layers.length > 0) {
+          const flat = flattenBoardLayers(m.layers)
+          setPaths(Array.isArray(flat.paths) ? flat.paths : [])
+          setIcons(Array.isArray(flat.icons) ? flat.icons : [])
+        } else {
+          setPaths(Array.isArray(m.paths) ? m.paths : [])
+          setIcons(Array.isArray(m.icons) ? m.icons : [])
+        }
         if (board.fieldZone && FIELD_OPTIONS.some(o => o.id === board.fieldZone)) setFieldZone(board.fieldZone)
       })
       .catch(() => {})
-  }, [fromBoardId, getToken])
+  }, [fromBoardId, user?.id, authFetchOpts])
 
   useEffect(() => {
     if (!user?.id || videoIdParam) return
@@ -390,7 +467,8 @@ export default function TacticalVideo() {
     setPlayDisplay(null)
   }, [])
 
-  const encodeProjectToMp4Blob = useCallback(async () => {
+  /** Одна запись canvas → blob (MP4 или WebM — что выбрал pickRecorderMimeType). */
+  const recordProjectVideo = useCallback(async () => {
     const canvas = document.getElementById('tactical-video-canvas')
     if (!canvas) throw new Error('Нет canvas')
     const segMs = Math.max(200, segmentSec * 1000)
@@ -405,32 +483,36 @@ export default function TacticalVideo() {
         flushSync(() => setPlayDisplay(frame))
       }
     })
-    return convertVideoBlobToMp4(blob, guessRecorderInputExtension(mime))
+    return { blob, mime, totalMs }
   }, [keyframes, segmentSec])
 
   const pushCabinetBlob = useCallback(
-    async (outBlob) => {
-      const token = getToken()
-      if (!token) {
+    async (outBlob, mime) => {
+      if (!user?.id) {
         const err = new Error('Войдите в аккаунт')
         err.code = 'AUTH'
         throw err
       }
+      const ext = guessRecorderInputExtension(mime || '')
       const fd = new FormData()
-      fd.append('file', outBlob, 'video.mp4')
+      fd.append('file', outBlob, `video.${ext}`)
       fd.append('title', videoTitle.trim() || `Видео ${new Date().toLocaleString('ru')}`)
       fd.append('keyframes', JSON.stringify(keyframes))
       fd.append('segmentSec', String(segmentSec))
       const url = editingVideoId ? `/api/user/videos/${editingVideoId}` : '/api/user/videos'
       const method = editingVideoId ? 'PUT' : 'POST'
-      const res = await fetch(url, { method, headers: { Authorization: token }, body: fd })
+      const res = await authFetch(url, {
+        ...authFetchOpts,
+        method,
+        body: fd,
+        networkMessage: 'upload'
+      })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         const err = new Error(data.error || 'Не удалось сохранить в кабинете')
-        err.code = data.code
+        err.code = data.code || (res.status === 401 ? 'AUTH' : undefined)
         throw err
       }
-      loadedServerVideoIdRef.current = data.id
       setEditingVideoId(data.id)
       setVideoReadOnly(!!data.readonly)
       navigate(`/board/video?videoId=${encodeURIComponent(data.id)}`, { replace: true })
@@ -440,7 +522,8 @@ export default function TacticalVideo() {
       refreshProfile()
     },
     [
-      getToken,
+      user?.id,
+      authFetchOpts,
       videoTitle,
       keyframes,
       segmentSec,
@@ -451,31 +534,65 @@ export default function TacticalVideo() {
     ]
   )
 
+  /** Пока /api/user/tactical-video/limits не ответил, опираемся на профиль — иначе кнопки «скачать» молча не работали. */
+  const canDownloadMp4 = useMemo(() => {
+    if (user?.isAdmin && authFetchOpts.viewAs == null) return true
+    if (tvLimits?.canDownloadMp4 != null) return !!tvLimits.canDownloadMp4
+    const tid = profile?.effectiveTariff ?? profile?.tariff ?? 'free'
+    return getTariffLimits(tid).canSaveDownloadTacticalVideo === true
+  }, [user?.isAdmin, authFetchOpts.viewAs, tvLimits, profile?.effectiveTariff, profile?.tariff])
+
   const handleDownloadMp4 = useCallback(async () => {
     if (keyframes.length < 2 || exportLockRef.current) return
-    if (!user?.isAdmin && user?.id && tvLimits === null) return
-    if (!user?.isAdmin && tvLimits?.canDownloadMp4 !== true) {
-      setTariffModalMessage('Скачивание MP4 доступно на тарифе Про+.')
+    if (!canDownloadMp4) {
+      setTariffModalMessage('Скачивание видео доступно на тарифе Про+.')
       setTariffModalOpen(true)
       return
     }
     exportLockRef.current = true
     setExporting(true)
     try {
-      const outBlob = await encodeProjectToMp4Blob()
+      const { blob, mime, totalMs } = await recordProjectVideo()
+      const { blob: outBlob, mime: outMime, extension } = await ensurePlayableMp4Blob(blob, mime, totalMs)
       const safeName = (videoTitle.trim() || 'tactic-video').replace(/[\\/:*?"<>|]/g, '').slice(0, 80)
-      triggerBlobDownload(outBlob, `${safeName || 'tactic-video'}-${Date.now()}.mp4`)
+      const ext = extension || guessRecorderInputExtension(outMime)
+      const baseFile = `${safeName || 'tactic-video'}-${Date.now()}`
+      triggerBlobDownload(outBlob, `${baseFile}.${ext}`)
 
       const autoSave =
-        !!(user?.isAdmin || tvLimits?.autoSaveOnDownload || tvLimits?.unlimitedCabinet) && !videoReadOnly
-      if (autoSave) {
-        await pushCabinetBlob(outBlob)
+        !!((user?.isAdmin && authFetchOpts.viewAs == null) || tvLimits?.autoSaveOnDownload || tvLimits?.unlimitedCabinet) &&
+        !videoReadOnly
+      if (autoSave && user?.id) {
+        try {
+          await pushCabinetBlob(outBlob, outMime)
+        } catch (e) {
+          if (e?.code === 'AUTH') {
+            window.alert(
+              'Войдите в аккаунт, чтобы сохранить копию в кабинете. Файл уже скачан на устройство.'
+            )
+          } else if (e?.code === 'NETWORK') {
+            window.alert(
+              'Файл уже скачан на устройство.\n\n' +
+                (e?.message || 'Не удалось отправить копию в кабинет — проверьте сеть.')
+            )
+          } else if (e?.code && e.code !== 'NETWORK' && e.code !== 'AUTH') {
+            setTariffModalMessage(e.message || MSG_DEFAULT)
+            setTariffModalOpen(true)
+          } else {
+            window.alert(
+              'Файл уже скачан на устройство.\n\n' +
+                (e?.message || 'Не удалось сохранить копию в кабинете на сервере.')
+            )
+          }
+        }
       }
     } catch (e) {
-      if (e?.code && e.code !== 'AUTH') {
+      if (e?.code === 'NETWORK' || e?.code === 'AUTH') {
+        window.alert(e?.message || 'Не удалось обработать видео')
+      } else if (e?.code) {
         setTariffModalMessage(e.message || MSG_DEFAULT)
         setTariffModalOpen(true)
-      } else if (e?.message !== 'AUTH') {
+      } else {
         window.alert(e?.message || 'Не удалось обработать видео')
       }
     } finally {
@@ -487,19 +604,28 @@ export default function TacticalVideo() {
     keyframes,
     videoTitle,
     user?.isAdmin,
+    authFetchOpts.viewAs,
     tvLimits,
     videoReadOnly,
-    encodeProjectToMp4Blob,
-    pushCabinetBlob
+    recordProjectVideo,
+    pushCabinetBlob,
+    canDownloadMp4,
+    user?.id
   ])
 
   const handleSaveToCabinet = useCallback(async () => {
     if (keyframes.length < 2 || exportLockRef.current || videoReadOnly) return
     if (!user?.id) return
-    if (!user?.isAdmin && tvLimits === null) return
+    if (user?.id && tvLimits === null && (!user?.isAdmin || (user?.isAdmin && authFetchOpts.viewAs != null))) {
+      void loadTvLimits()
+      window.alert(
+        'Загружаются лимиты тарифа с сервера. Подождите несколько секунд и нажмите «Сохранить» снова. Если сообщение повторяется — обновите страницу (F5).'
+      )
+      return
+    }
 
     const skipQuotaChecks =
-      user?.isAdmin ||
+      (user?.isAdmin && authFetchOpts.viewAs == null) ||
       tvLimits?.autoSaveOnDownload ||
       tvLimits?.unlimitedCabinet
 
@@ -529,10 +655,13 @@ export default function TacticalVideo() {
     exportLockRef.current = true
     setExporting(true)
     try {
-      const outBlob = await encodeProjectToMp4Blob()
-      await pushCabinetBlob(outBlob)
+      const { blob, mime, totalMs } = await recordProjectVideo()
+      const { blob: outBlob, mime: outMime } = await ensurePlayableMp4Blob(blob, mime, totalMs)
+      await pushCabinetBlob(outBlob, outMime)
     } catch (e) {
-      if (e?.code) {
+      if (e?.code === 'NETWORK' || e?.code === 'AUTH') {
+        window.alert(e?.message || 'Не удалось сохранить')
+      } else if (e?.code) {
         setTariffModalMessage(e.message || MSG_DEFAULT)
         setTariffModalOpen(true)
       } else {
@@ -546,21 +675,30 @@ export default function TacticalVideo() {
   }, [
     keyframes,
     videoReadOnly,
+    user?.id,
     user?.isAdmin,
+    authFetchOpts.viewAs,
     tvLimits,
     editingVideoId,
-    encodeProjectToMp4Blob,
-    pushCabinetBlob
+    recordProjectVideo,
+    pushCabinetBlob,
+    loadTvLimits
   ])
 
   const boardLocked = playing || exporting || videoReadOnly
-  const limitsPending = !user?.isAdmin && !!user?.id && tvLimits === null
+  /** Блокируем кнопки только пока нет ни ответа limits, ни тарифа из профиля (иначе вечный «pending»). */
+  const limitsPending =
+    !!user?.id &&
+    tvLimits === null &&
+    (!user?.isAdmin || (user?.isAdmin && authFetchOpts.viewAs != null)) &&
+    !(profile?.effectiveTariff ?? profile?.tariff)
   const showManualSaveButton =
     !!user?.id &&
-    (user?.isAdmin ||
-      (tvLimits &&
-        !tvLimits.autoSaveOnDownload &&
-        !tvLimits.unlimitedCabinet))
+    ((user?.isAdmin && authFetchOpts.viewAs == null) ||
+      (tvLimits && !tvLimits.autoSaveOnDownload && !tvLimits.unlimitedCabinet) ||
+      (!tvLimits &&
+        profile &&
+        !getTariffLimits(profile.effectiveTariff ?? profile.tariff ?? 'free').canSaveDownloadTacticalVideo))
   const saveQuotaReached =
     !editingVideoId &&
     tvLimits &&
@@ -573,44 +711,115 @@ export default function TacticalVideo() {
   const keyframeLimitReached =
     maxKeyframesFree != null && keyframes.length >= maxKeyframesFree
 
-  const canDownloadMp4 = !!(user?.isAdmin || tvLimits?.canDownloadMp4)
+  const clearFrameLongPressTimer = useCallback(() => {
+    if (frameLongPressTimerRef.current != null) {
+      clearTimeout(frameLongPressTimerRef.current)
+      frameLongPressTimerRef.current = null
+    }
+  }, [])
+
+  const onFrameShellPointerDown = useCallback(() => {
+    if (boardLocked) return
+    suppressFrameTapRef.current = false
+    clearFrameLongPressTimer()
+    frameLongPressTimerRef.current = window.setTimeout(() => {
+      frameLongPressTimerRef.current = null
+      suppressFrameTapRef.current = true
+      storyBarRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 500)
+  }, [boardLocked, clearFrameLongPressTimer])
+
+  const onFrameShellPointerEnd = useCallback(() => {
+    clearFrameLongPressTimer()
+  }, [clearFrameLongPressTimer])
+
+  const onFrameShellClick = useCallback(() => {
+    if (suppressFrameTapRef.current) {
+      suppressFrameTapRef.current = false
+      return
+    }
+    if (boardLocked || keyframeLimitReached) return
+    addKeyframe()
+  }, [addKeyframe, boardLocked, keyframeLimitReached])
 
   return (
     <div
-      className="tactical-board-page tactical-video-page"
+      className={`tactical-board-page tactical-video-page${isMobileShell ? ' tactical-board-page--mobile-shell' : ''}`}
       style={{ '--tactical-header-h': `${tacticalHeaderH}px` }}
     >
-      <header ref={headerRef} className="tactical-board-header tactical-video-header">
-        <div className="tactical-video-header-main">
-          <h1 className="tactical-board-title">Видео с доски</h1>
-          <label className="tactical-video-title-field">
-            <span className="tactical-video-title-label">Название</span>
-            <input
-              type="text"
-              className="tactical-video-title-input"
-              value={videoTitle}
-              onChange={(e) => setVideoTitle(e.target.value)}
-              disabled={boardLocked}
-              placeholder="Как назвать видео"
-              maxLength={120}
-            />
-          </label>
-          {cabinetSaveHint && <span className="tactical-video-save-hint">{cabinetSaveHint}</span>}
-          {videoReadOnly && (
-            <span className="tactical-video-readonly-badge">Только просмотр: раскадровку изменить нельзя по тарифу.</span>
-          )}
-          {tvLimits?.tariff === 'pro_plus' && !user?.isAdmin && (
-            <p className="tactical-video-retention-banner">
-              Через месяц после создания запись попадает в архив, через 3 месяца удаляется автоматически.
-            </p>
-          )}
-        </div>
-        <div className="tactical-board-header-actions">
-          <button type="button" className="btn-outline" onClick={() => navigate(user?.isAdmin ? '/admin' : '/cabinet?section=videos')}>
-            К кабинету
+      {videoLoadError && (
+        <div className="tactical-video-load-error" role="alert">
+          <span className="tactical-video-load-error-text">{videoLoadError}</span>
+          <button
+            type="button"
+            className="btn-outline btn-small"
+            onClick={() => {
+              loadedServerVideoIdRef.current = null
+              setVideoLoadError(null)
+              setVideoLoadRetryKey((k) => k + 1)
+            }}
+          >
+            Повторить
+          </button>
+          <button
+            type="button"
+            className="btn-outline btn-small"
+            onClick={() => navigate(user?.isAdmin ? '/admin' : '/cabinet?section=videos')}
+          >
+            К списку видео
           </button>
         </div>
-      </header>
+      )}
+      {!isMobileShell && (
+        <header ref={headerRef} className="tactical-board-header tactical-video-header">
+          <div className="tactical-video-header-main">
+            <h1 className="tactical-board-title">Видео с доски</h1>
+            <label className="tactical-video-title-field">
+              <span className="tactical-video-title-label">Название</span>
+              <input
+                type="text"
+                className="tactical-video-title-input"
+                value={videoTitle}
+                onChange={(e) => setVideoTitle(e.target.value)}
+                disabled={boardLocked}
+                placeholder="Как назвать видео"
+                maxLength={120}
+              />
+            </label>
+            {cabinetSaveHint && <span className="tactical-video-save-hint">{cabinetSaveHint}</span>}
+            {videoReadOnly && (
+              <span className="tactical-video-readonly-badge">Только просмотр: раскадровку изменить нельзя по тарифу.</span>
+            )}
+            {tvLimits?.tariff === 'pro_plus' && !user?.isAdmin && (
+              <p className="tactical-video-retention-banner">
+                Через месяц после создания запись попадает в архив, через 3 месяца удаляется автоматически.
+              </p>
+            )}
+          </div>
+          <div className="tactical-board-header-actions">
+            <button type="button" className="btn-outline" onClick={() => navigate(user?.isAdmin ? '/admin' : '/cabinet?section=videos')}>
+              К кабинету
+            </button>
+            <button
+              type="button"
+              className="btn-outline"
+              onClick={() =>
+                openLibraryOrWarn(
+                  navigate,
+                  {
+                    path: `${location.pathname}${location.search}`,
+                    buttonLabel: 'Вернуться к видео с доски'
+                  },
+                  null,
+                  { mode: 'video' }
+                )
+              }
+            >
+              Каталог
+            </button>
+          </div>
+        </header>
+      )}
       <div className="tactical-board-canvas-wrap">
         <HockeyBoard
           canvasId="tactical-video-canvas"
@@ -626,6 +835,66 @@ export default function TacticalVideo() {
           teamLogo={profile?.teamLogo}
           customBackgrounds={canvasBackgrounds}
           canDownloadPng={false}
+          mobileShellLayout={isMobileShell}
+          mobileToolbarChromeLeft={
+            isMobileShell ? (
+              <button
+                type="button"
+                className="tactical-video-frame-shell-btn"
+                disabled={boardLocked || keyframeLimitReached}
+                onPointerDown={onFrameShellPointerDown}
+                onPointerUp={onFrameShellPointerEnd}
+                onPointerCancel={onFrameShellPointerEnd}
+                onPointerLeave={onFrameShellPointerEnd}
+                onClick={onFrameShellClick}
+                title="Кадр: касание — добавить кадр; удержание — раскадровка и скорость"
+                aria-label="Кадр"
+              >
+                <Camera size={22} strokeWidth={2} aria-hidden />
+              </button>
+            ) : null
+          }
+          mobileToolbarChromeRight={
+            isMobileShell ? (
+              <>
+                {canDownloadMp4 && (
+                  <button
+                    type="button"
+                    className="btn-outline btn-icon-only tactical-video-shell-top-icon"
+                    disabled={keyframes.length < 2 || exporting || limitsPending}
+                    onClick={handleDownloadMp4}
+                    title={exporting ? 'Обработка…' : 'Скачать видео (MP4 или WebM)'}
+                  >
+                    {exporting ? <Loader2 size={18} strokeWidth={2} className="tactical-video-btn-spinner" aria-hidden /> : <Download size={18} strokeWidth={2} aria-hidden />}
+                  </button>
+                )}
+                {showManualSaveButton && (
+                  <button
+                    type="button"
+                    className="btn-outline btn-icon-only tactical-video-shell-top-icon"
+                    disabled={
+                      keyframes.length < 2 ||
+                      exporting ||
+                      limitsPending ||
+                      saveQuotaReached ||
+                      videoReadOnly
+                    }
+                    onClick={handleSaveToCabinet}
+                    title={exporting ? 'Обработка…' : 'Сохранить в кабинет'}
+                  >
+                    {exporting ? <Loader2 size={18} strokeWidth={2} className="tactical-video-btn-spinner" aria-hidden /> : <Save size={18} strokeWidth={2} aria-hidden />}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="btn-outline btn-tactical-shell-cabinet"
+                  onClick={() => navigate(user?.isAdmin ? '/admin' : '/cabinet?section=videos')}
+                >
+                  К кабинету
+                </button>
+              </>
+            ) : null
+          }
           toolbarRight={
             <div className="field-zone-select-wrap" ref={fieldSelectRef}>
               <button
@@ -649,27 +918,35 @@ export default function TacticalVideo() {
               </button>
               {fieldSelectOpen && !boardLocked && (
                 <div className="field-zone-dropdown" onWheel={(e) => e.stopPropagation()}>
-                  {FIELD_OPTIONS.map(opt => (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      className={`field-zone-option ${fieldZone === opt.id ? 'selected' : ''}`}
-                      onClick={() => {
-                        setFieldZone(opt.id)
-                        setFieldSelectOpen(false)
-                      }}
-                    >
-                      {opt.label}
-                      {fieldZone === opt.id && <Check size={16} />}
-                    </button>
-                  ))}
+                  {FIELD_OPTIONS.map(opt => {
+                    const locked = isFieldZoneLockedForTariff(profile?.effectiveTariff ?? profile?.tariff, opt.id)
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        className={`field-zone-option ${fieldZone === opt.id ? 'selected' : ''} ${locked ? 'field-zone-option--locked' : ''}`}
+                        title={locked ? FIELD_ZONE_UPGRADE_TOOLTIP : undefined}
+                        onClick={() => {
+                          if (locked) return
+                          setFieldZone(opt.id)
+                          setFieldSelectOpen(false)
+                        }}
+                      >
+                        <span className="field-zone-option-label">{opt.label}</span>
+                        <span className="field-zone-option-suffix">
+                          {locked ? <Lock size={14} strokeWidth={2} className="field-zone-lock-icon" aria-hidden /> : null}
+                          {fieldZone === opt.id && !locked ? <Check size={16} /> : null}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
           }
         />
       </div>
-      <div className="tactical-video-story-bar">
+      <div ref={storyBarRef} className="tactical-video-story-bar">
         <div className="tactical-video-story-row">
           <span className="tactical-video-story-label">Раскадровка</span>
           <button
@@ -760,10 +1037,10 @@ export default function TacticalVideo() {
                 <button
                   type="button"
                   className="btn-outline tactical-video-download-btn tactical-video-play-action-btn"
-                  disabled={keyframes.length < 2 || exporting || limitsPending}
+                  disabled={keyframes.length < 2 || exporting}
                   onClick={handleDownloadMp4}
-                  title={exporting ? 'Обработка…' : 'Скачать MP4'}
-                  aria-label={exporting ? 'Обработка видео' : 'Скачать MP4'}
+                  title={exporting ? 'Обработка…' : 'Скачать видео (MP4 или WebM)'}
+                  aria-label={exporting ? 'Обработка видео' : 'Скачать видео'}
                 >
                   {exporting ? (
                     <Loader2 size={18} strokeWidth={2} className="tactical-video-btn-spinner" aria-hidden />
@@ -771,7 +1048,7 @@ export default function TacticalVideo() {
                     <Download size={18} strokeWidth={2} aria-hidden />
                   )}
                   <span className="tactical-video-action-label">
-                    {exporting ? 'Обработка…' : 'Скачать MP4'}
+                    {exporting ? 'Обработка…' : 'Скачать видео'}
                   </span>
                 </button>
               )}

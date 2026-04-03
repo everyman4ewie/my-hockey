@@ -43,6 +43,7 @@ export default function Register() {
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email,
@@ -53,7 +54,7 @@ export default function Register() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Ошибка регистрации')
-      authLogin(data.user, data.token)
+      authLogin(data.user)
       navigate(afterAuthPath || '/cabinet')
     } catch (err) {
       setError(err.message)
