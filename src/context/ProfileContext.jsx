@@ -10,6 +10,7 @@ const defaultProfile = {
   photo: null,
   tariff: 'free',
   effectiveTariff: 'free',
+  organization: null,
   isEditor: false,
   tariffSuspended: false,
   teamLogo: null,
@@ -40,6 +41,7 @@ const adminProfile = {
 /** Есть ли уже загруженные с сервера данные (не дефолт до первого ответа). */
 function profileLooksHydrated(p) {
   if (!p) return false
+  if (p.organization) return true
   if (p.tariff && p.tariff !== 'free') return true
   if (p.effectiveTariff && p.effectiveTariff !== 'free') return true
   const u = p.usage || {}
@@ -92,7 +94,8 @@ export function ProfileProvider({ children }) {
               name: data.name || '',
               photo: data.photo || null,
               tariff: data.tariff || 'free',
-              effectiveTariff: data.effectiveTariff || data.tariff || 'free',
+              effectiveTariff: data.effectiveTariff ?? data.tariff ?? 'free',
+              organization: data.organization || null,
               isEditor: editor,
               tariffSuspended: !!data.tariffSuspended,
               teamLogo: data.teamLogo || null,
@@ -146,7 +149,8 @@ export function ProfileProvider({ children }) {
           name: data.name || '',
           photo: data.photo || null,
           tariff: data.tariff || 'free',
-          effectiveTariff: data.effectiveTariff || data.tariff || 'free',
+          effectiveTariff: data.effectiveTariff ?? data.tariff ?? 'free',
+          organization: data.organization || null,
           isEditor: editor,
           tariffSuspended: !!data.tariffSuspended,
           teamLogo: data.teamLogo || null,

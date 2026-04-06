@@ -1,22 +1,28 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { Target, FileText, Download, Award, Zap, Shield, Menu, User, X, LogIn, Video } from 'lucide-react'
 import HockeyDecorations from '../components/HockeyDecorations/HockeyDecorations'
-import { TARIFFS } from '../constants/tariffs'
 import { LANDING_FEATURES_DEFAULTS } from '../constants/landingFeaturesDefaults'
 import { mergeSeo } from '../constants/seoDefaults'
 import { mergeLandingFeatures } from '../utils/mergeLandingFeatures'
+import { getLandingTariffsWithFeatures, getTariffLandingFeatures } from '../utils/tariffLandingFeatures'
+import { getTariffById } from '../constants/tariffs'
+import CorporatePriceBlock from '../components/CorporatePriceBlock/CorporatePriceBlock'
 import { applySeoToDocument } from '../utils/applySeoToDocument'
 import './Landing.css'
 
-const LANDING_TARIFF_IDS = ['free', 'pro', 'pro_plus']
-const LANDING_TARIFFS = LANDING_TARIFF_IDS.map((id) => TARIFFS.find((t) => t.id === id)).filter(Boolean)
 const TARIFFS_CABINET_PATH = '/cabinet?section=tariffs'
 
 function tariffChooseHref(loggedIn) {
   if (loggedIn) return TARIFFS_CABINET_PATH
   return `/register?redirect=${encodeURIComponent(TARIFFS_CABINET_PATH)}`
+}
+
+function corporateTariffHref(loggedIn, tier) {
+  const path = `/cabinet?section=tariffs&corporateQuote=1&corporateTier=${encodeURIComponent(tier)}`
+  if (loggedIn) return path
+  return `/register?redirect=${encodeURIComponent(path)}`
 }
 
 function formatLandingPrice(tariff, billingPeriod) {
@@ -69,7 +75,8 @@ const defaultPages = {
   footerLegalInn: 'ИНН: 760402772519',
   footerLegalOgrnip: 'ОГРНИП: 325762700040692',
   footerText: '© Hockey Tactics — платформа для тренеров и хоккеистов',
-  features: LANDING_FEATURES_DEFAULTS.map((f) => ({ ...f }))
+  features: LANDING_FEATURES_DEFAULTS.map((f) => ({ ...f })),
+  tariffLandingFeatures: {}
 }
 
 export default function Landing() {
@@ -77,16 +84,27 @@ export default function Landing() {
   const [pages, setPages] = useState(defaultPages)
   const [menuOpen, setMenuOpen] = useState(false)
   const [billingPeriod, setBillingPeriod] = useState('year')
+  const [corporateTier, setCorporateTier] = useState('corporate_pro')
 
   useEffect(() => {
     fetch('/api/pages/landing', { credentials: 'include' })
       .then((r) => r.json())
       .then((data) => {
+        if (!data || typeof data !== 'object') return
         setPages(() => {
-          const merged = { ...defaultPages, ...data }
-          merged.features = mergeLandingFeatures(data.features, LANDING_FEATURES_DEFAULTS)
-          merged.seo = mergeSeo(data.seo)
-          return merged
+          try {
+            const merged = { ...defaultPages, ...data }
+            merged.features = mergeLandingFeatures(data.features, LANDING_FEATURES_DEFAULTS)
+            merged.tariffLandingFeatures =
+              data.tariffLandingFeatures && typeof data.tariffLandingFeatures === 'object'
+                ? data.tariffLandingFeatures
+                : {}
+            merged.seo = mergeSeo(data.seo)
+            return merged
+          } catch (e) {
+            console.error('[Landing] merge pages failed', e)
+            return defaultPages
+          }
         })
       })
       .catch(() => {})
@@ -100,6 +118,11 @@ export default function Landing() {
       logoUrl: pages.logoUrl
     })
   }, [pages])
+
+  const landingTariffs = useMemo(
+    () => getLandingTariffsWithFeatures(pages.tariffLandingFeatures),
+    [pages.tariffLandingFeatures]
+  )
 
   return (
     <div className="landing landing-ice">
@@ -243,8 +266,8 @@ export default function Landing() {
               </button>
             </div>
           </div>
-          <div className="price-grid price-grid-mockup">
-            {LANDING_TARIFFS.map((t) => (
+          <div className="price-grid price-grid-mockup price-grid-mockup-four">
+            {landingTariffs.map((t) => (
               <div
                 key={t.id}
                 className={`price-card price-card-mockup ${t.id === 'pro' ? 'price-card-landing-popular' : ''}`}
@@ -256,13 +279,51 @@ export default function Landing() {
                 </Link>
                 <p className="price-card-tagline">{t.description}</p>
                 <ul className="price-features price-features-mockup">
-                  {t.features.map((line) => (
-                    <li key={line}>{line}</li>
+                  {t.features.map((line, i) => (
+                    <li key={`${t.id}-${i}`}>{line}</li>
                   ))}
                 </ul>
                 <p className="price-card-amount">{formatLandingPrice(t, billingPeriod)}</p>
               </div>
             ))}
+            <div id="corporate" className="price-card price-card-mockup price-card-corporate">
+              <div className="price-card-head price-card-head-static">
+                <span className="price-card-head-title">Корпоративный</span>
+              </div>
+              <div className="price-corporate-tier-toggle" role="group" aria-label="Уровень корпоративного тарифа">
+                <button
+                  type="button"
+                  className={corporateTier === 'corporate_pro' ? 'active' : ''}
+                  onClick={() => setCorporateTier('corporate_pro')}
+                >
+                  Про
+                </button>
+                <button
+                  type="button"
+                  className={corporateTier === 'corporate_pro_plus' ? 'active' : ''}
+                  onClick={() => setCorporateTier('corporate_pro_plus')}
+                >
+                  Про+
+                </button>
+              </div>
+              <p className="price-card-tagline price-card-tagline-corporate">
+                {getTariffById(corporateTier)?.description}
+              </p>
+              <p className="price-corporate-billing-note">
+                Для школ и клубов. Оплата по счёту на расчётный счёт — онлайн-оплата на сайте недоступна.
+              </p>
+              <ul className="price-features price-features-mockup">
+                {getTariffLandingFeatures(corporateTier, pages.tariffLandingFeatures).map((line, i) => (
+                  <li key={`corp-${corporateTier}-${i}`}>{line}</li>
+                ))}
+              </ul>
+              <div className="price-card-amount price-card-amount-corporate">
+                <CorporatePriceBlock tierId={corporateTier} variant="landing" billingPeriod={billingPeriod} />
+              </div>
+              <Link to={corporateTariffHref(!!user, corporateTier)} className="btn-outline landing-corporate-link">
+                Запросить счёт
+              </Link>
+            </div>
           </div>
         </section>
 

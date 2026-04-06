@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState, useEffect } from 'react'
 import { ChevronDown, Check, Layers, Trash2 } from 'lucide-react'
 import HockeyBoard, { TOOLS } from '../HockeyBoard/HockeyBoard'
+import { Board2D3DShell } from '../Rink3D/Board2D3DShell.jsx'
 import FieldZoneSelector, { FIELD_OPTIONS } from '../FieldZoneSelector/FieldZoneSelector'
 import PlanMobileNotesPopover from '../PlanMobileNotesPopover/PlanMobileNotesPopover'
 import RichTextEditor from '../RichTextEditor/RichTextEditor'
@@ -146,6 +147,8 @@ export default function PlanExerciseCanvas({
 
   const fieldZone = exercise.canvasData?.fieldZone ?? 'full'
   const effectiveTariff = profile?.effectiveTariff ?? profile?.tariff
+  /** План-конспект: только 2D, без переключения и без 3D-сцены */
+  const boardViewMode = '2d'
 
   const catalogToolbarBtn =
     onOpenCatalog && !readOnly ? (
@@ -254,70 +257,78 @@ export default function PlanExerciseCanvas({
         </button>
       )}
       <div className={`plan-left${isMobileShell ? ' plan-mobile-board-wrap' : ''}`}>
-        <HockeyBoard
-          canvasId={`exercise-canvas-${idx}`}
-          allowedToolIds={allowedToolIds}
-          canDownloadPng={limits.canDownloadPlanImages}
-          paths={hasLayers ? pathsPx : exercise.canvasData?.paths ?? []}
-          icons={hasLayers ? iconsPx : exercise.canvasData?.icons ?? []}
-          fieldZone={fieldZone}
-          teamLogo={profile?.teamLogo}
-          customBackgrounds={canvasBackgrounds}
-          width={canvasW}
-          height={canvasH}
-          fitCanvasToContainer={isMobileShell}
-          mobileShellLayout={isMobileShell}
-          readOnly={readOnly}
-          layersRender={hasLayers ? layersRender : undefined}
-          activeLayerId={hasLayers ? activeLayerId : undefined}
-          clearMenuWithLayers={hasLayers && layers.length > 1}
-          onClearAllLayers={hasLayers && layers.length > 1 ? handleClearAllLayers : undefined}
-          mobileToolbarChromeLeft={
-            isMobileShell && idx === mobilePlanExerciseIdx ? (
-              <PlanMobileNotesPopover
-                isOpen={mobileNotesOpenIdx === idx}
-                onToggle={() => setMobileNotesOpenIdx(mobileNotesOpenIdx === idx ? null : idx)}
-                onClose={() => setMobileNotesOpenIdx(null)}
-                title={title}
-                onTitleChange={onTitleChange}
-                showTitle={idx === 0}
-                exerciseIndex={idx}
-                exerciseCount={exercisesLength}
-                textContent={exercise.textContent}
-                onTextChange={(tc) => onExerciseChange(idx, { textContent: tc })}
-                onExportPdf={onExportPdf}
-                onExportWord={onExportWord}
-                showWordExport={limits.maxWordDownloads !== 0}
-                autoSaved={autoSaved}
-              />
-            ) : undefined
-          }
-          mobileToolbarChromeCenter={isMobileShell && idx === mobilePlanExerciseIdx ? mobileToolbarChromeCenter : null}
-          mobileToolbarChromeRight={isMobileShell && idx === mobilePlanExerciseIdx ? mobileToolbarChromeRight : null}
-          onChange={hasLayers ? handleLayerBoardChange : handleSingleBoardChange}
-          toolbarRight={
-            readOnly ? (
-              hasLayers ? (
-                readOnlyLayerToolbar
-              ) : (
-                <span className="field-zone-readonly" style={{ padding: '0 8px', fontSize: 13 }}>
-                  {FIELD_OPTIONS.find((o) => o.id === fieldZone)?.label ?? 'Полная площадка'}
-                </span>
-              )
-            ) : hasLayers ? (
-              layerToolbar
-            ) : (
-              <div className="tactical-toolbar-field-zone-stack">
-                {catalogToolbarBtn}
-                <FieldZoneSelector
-                  value={fieldZone}
-                  onChange={(zone) => onFieldZoneChange(idx, zone)}
-                  effectiveTariff={effectiveTariff}
-                />
-              </div>
-            )
-          }
-        />
+        <Board2D3DShell
+          viewMode="2d"
+          onViewModeChange={() => {}}
+          view3dAvailable={false}
+        >
+            <HockeyBoard
+              canvasId={`exercise-canvas-${idx}`}
+              boardViewMode={boardViewMode}
+              allowedToolIds={allowedToolIds}
+              canDownloadPng={limits.canDownloadPlanImages}
+              paths={hasLayers ? pathsPx : exercise.canvasData?.paths ?? []}
+              icons={hasLayers ? iconsPx : exercise.canvasData?.icons ?? []}
+              fieldZone={fieldZone}
+              teamLogo={profile?.teamLogo}
+              customBackgrounds={canvasBackgrounds}
+              width={canvasW}
+              height={canvasH}
+              fitCanvasToContainer
+              fitDisplayShrinkPx={8}
+              mobileShellLayout={isMobileShell}
+              readOnly={readOnly}
+              layersRender={hasLayers ? layersRender : undefined}
+              activeLayerId={hasLayers ? activeLayerId : undefined}
+              clearMenuWithLayers={hasLayers && layers.length > 1}
+              onClearAllLayers={hasLayers && layers.length > 1 ? handleClearAllLayers : undefined}
+              mobileToolbarChromeLeft={
+                isMobileShell && idx === mobilePlanExerciseIdx ? (
+                  <PlanMobileNotesPopover
+                    isOpen={mobileNotesOpenIdx === idx}
+                    onToggle={() => setMobileNotesOpenIdx(mobileNotesOpenIdx === idx ? null : idx)}
+                    onClose={() => setMobileNotesOpenIdx(null)}
+                    title={title}
+                    onTitleChange={onTitleChange}
+                    showTitle={idx === 0}
+                    exerciseIndex={idx}
+                    exerciseCount={exercisesLength}
+                    textContent={exercise.textContent}
+                    onTextChange={(tc) => onExerciseChange(idx, { textContent: tc })}
+                    onExportPdf={onExportPdf}
+                    onExportWord={onExportWord}
+                    showWordExport={limits.maxWordDownloads !== 0}
+                    autoSaved={autoSaved}
+                  />
+                ) : undefined
+              }
+              mobileToolbarChromeCenter={isMobileShell && idx === mobilePlanExerciseIdx ? mobileToolbarChromeCenter : null}
+              mobileToolbarChromeRight={isMobileShell && idx === mobilePlanExerciseIdx ? mobileToolbarChromeRight : null}
+              onChange={hasLayers ? handleLayerBoardChange : handleSingleBoardChange}
+              toolbarRight={
+                readOnly ? (
+                  hasLayers ? (
+                    readOnlyLayerToolbar
+                  ) : (
+                    <span className="field-zone-readonly" style={{ padding: '0 8px', fontSize: 13 }}>
+                      {FIELD_OPTIONS.find((o) => o.id === fieldZone)?.label ?? 'Полная площадка'}
+                    </span>
+                  )
+                ) : hasLayers ? (
+                  layerToolbar
+                ) : (
+                  <div className="tactical-toolbar-field-zone-stack">
+                    {catalogToolbarBtn}
+                    <FieldZoneSelector
+                      value={fieldZone}
+                      onChange={(zone) => onFieldZoneChange(idx, zone)}
+                      effectiveTariff={effectiveTariff}
+                    />
+                  </div>
+                )
+              }
+            />
+        </Board2D3DShell>
       </div>
       {!isMobileShell && (
         <div className="plan-right">

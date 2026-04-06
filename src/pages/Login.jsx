@@ -44,7 +44,9 @@ export default function Login() {
         throw new Error('Некорректный ответ сервера')
       }
       authLogin(data.user)
-      if (afterAuthPath) {
+      if (data.user.mustChangePassword && !data.user.isAdmin) {
+        navigate('/cabinet?section=profile')
+      } else if (afterAuthPath) {
         navigate(afterAuthPath)
       } else {
         navigate(data.user.isAdmin ? '/admin' : '/cabinet')

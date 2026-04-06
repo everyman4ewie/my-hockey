@@ -7,7 +7,10 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  /** Совместимость: токен в httpOnly-cookie; заголовок не нужен, если cookie есть. */
+  /**
+   * Legacy: старый Bearer в localStorage (`hockey_token`). Сейчас сессия в httpOnly-cookie;
+   * getToken оставлен для редких путей и отладки — не убирать без аудита всех вызовов.
+   */
   const getToken = useCallback(() => localStorage.getItem('hockey_token') || '', [])
 
   useEffect(() => {
@@ -51,7 +54,8 @@ export function AuthProvider({ children }) {
     } catch (_) {}
   }
 
-  const logout = () => {
+  /** Стабильная ссылка: от неё зависят loadProfile в ProfileContext / Cabinet (иначе бесконечные GET /api/user/profile). */
+  const logout = useCallback(() => {
     const uid = user?.id
     setUser(null)
     localStorage.removeItem('hockey_user')
@@ -63,7 +67,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem(`tactical-board-draft-${uid}`)
       } catch (_) {}
     }
-  }
+  }, [user?.id])
 
   const updateUser = useCallback((updates) => {
     setUser((prev) => (prev ? { ...prev, ...updates } : null))

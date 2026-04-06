@@ -1,5 +1,51 @@
-.tactical-video-page {
+/* Три строки (десктоп): шапка | холст | раскадровка */
+.tactical-board-page.tactical-video-page {
   grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+/*
+ * Мобильный shell: шапки нет — только холст + раскадровка.
+ * Трёхстрочный grid (шапка|холст|низ) с двумя детьми кладёт холст в строку auto (часто 0px), а 1fr — в раскадровку:
+ * доска и верхняя панель пропадают. Здесь — колонка flex: холст flex:1, низ shrink:0.
+ */
+.tactical-board-page.tactical-video-page.tactical-board-page--mobile-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  min-width: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.tactical-board-page.tactical-video-page.tactical-board-page--mobile-shell > .tactical-video-load-error {
+  flex-shrink: 0;
+}
+
+.tactical-board-page.tactical-video-page.tactical-board-page--mobile-shell > .tactical-board-canvas-wrap {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tactical-board-page.tactical-video-page.tactical-board-page--mobile-shell > .tactical-video-story-bar {
+  flex-shrink: 0;
+}
+
+/*
+ * Полная площадка: в Board2D3DShell рендерится полоса 2D/3D под шапкой.
+ * На странице «Видео» на десктопе те же кнопки уже в header — дубль съедает высоту слота
+ * (у неполных площадок полосы нет). Скрываем только здесь и только при ширине > 768px:
+ * в mobile shell шапки нет — полоса остаётся единственным переключателем.
+ * 3D и viewMode не трогаем, только разметка.
+ */
+@media (min-width: 769px) {
+  .tactical-video-page:not(.tactical-board-page--mobile-shell) .tactical-view-mode-bar {
+    display: none;
+  }
 }
 
 .tactical-video-load-error {
@@ -132,11 +178,87 @@
 .tactical-video-keyframe-cap {
   font-size: 0.8rem;
   color: #64748b;
-  width: 100%;
+  flex: 0 0 auto;
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .tactical-video-page .tactical-board-canvas-wrap {
   min-height: 0;
+}
+
+/*
+ * Видео, 2D: панель инструментов в потоке (как раньше), без fixed + padding-top на корне доски.
+ * В 3D панель остаётся fixed под шапкой — как на тактической доске (reserveFixedToolbarPadding).
+ */
+.tactical-board-canvas-wrap--video-2d .board-toolbar {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  z-index: 1;
+  box-shadow: none;
+}
+
+.tactical-board-canvas-wrap--video-2d .hockey-board {
+  padding-top: 0;
+}
+
+.tactical-board-canvas-wrap--video-export {
+  position: relative;
+}
+
+.tactical-video-export-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  font-size: 0.95rem;
+  font-weight: 600;
+  pointer-events: none;
+  border-radius: 0;
+}
+
+.tactical-video-export-overlay-spin {
+  animation: tactical-video-export-spin 0.9s linear infinite;
+}
+
+@keyframes tactical-video-export-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.tactical-video-download-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.tactical-video-download-icon-wrap--labeled {
+  margin-right: 0.15rem;
+}
+
+/* Замок слева от стрелки «скачать» — бесплатный и Про */
+.tactical-video-download-icon-wrap--with-lock {
+  gap: 0.4rem;
+}
+
+.tactical-video-download-lock-inline {
+  flex-shrink: 0;
+  color: #475569;
+}
+
+.tactical-video-download-btn--pro-locked .tactical-video-download-lock-inline {
+  color: #334155;
 }
 
 .tactical-video-story-bar {
@@ -156,6 +278,13 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.75rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.tactical-video-story-row {
+  justify-content: flex-start;
 }
 
 .tactical-video-story-label {
@@ -327,7 +456,7 @@
     flex: 0 0 auto;
     flex-shrink: 0;
     width: auto;
-    margin-left: 0;
+    margin-left: auto;
     justify-content: flex-end;
     flex-wrap: nowrap;
     gap: 0.22rem;
@@ -421,28 +550,33 @@
   gap: 0.5rem;
   font-size: 0.875rem;
   color: #475569;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .tactical-video-segment-label input[type='range'] {
-  width: min(160px, 40vw);
+  width: min(160px, 28vw);
+  flex: 0 1 auto;
+  min-width: 72px;
 }
 
 .tactical-video-play-row {
-  justify-content: flex-end;
+  justify-content: stretch;
 }
 
 .tactical-video-speed-title-short {
   display: none;
 }
 
+/* Скорость слева, кнопки справа — без «плавания» по flex-end */
 .tactical-video-speed-actions-row {
   display: flex;
   flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: flex-end;
-  gap: 0.75rem;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -451,7 +585,80 @@
 .tactical-video-play-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
   flex-wrap: wrap;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.tactical-video-speed-actions-row > .tactical-video-play-action-btn {
+  flex: 0 0 auto;
+}
+
+/* Мобильный выбор 2D / 3D перед скачиванием (Про+ / Корп Про+) */
+.tactical-video-export-format-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background: rgba(15, 23, 42, 0.55);
+  box-sizing: border-box;
+}
+
+.tactical-video-export-format-modal {
+  width: 100%;
+  max-width: 22rem;
+  padding: 1.15rem 1.25rem 1rem;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
+  box-sizing: border-box;
+}
+
+.tactical-video-export-format-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.tactical-video-export-format-text {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #475569;
+}
+
+.tactical-video-export-format-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tactical-video-export-format-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 0.55rem 0.85rem;
+  font-size: 0.92rem;
+}
+
+.tactical-video-export-format-cancel {
+  display: block;
+  width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.45rem;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.tactical-video-export-format-cancel:hover {
+  color: #0f172a;
 }
 

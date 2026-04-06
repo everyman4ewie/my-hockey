@@ -1,28 +1,21 @@
-// Тарифы (синхронизировано с src/constants/tariffs.js)
+import { normalizeTariffId, getLimitsLookupKey } from '../shared/tariffNormalize.js'
+
+// Тарифы (описания карточек; нормализация id — shared/tariffNormalize.js)
+export { normalizeTariffId, getLimitsLookupKey }
+
+/** Синоним для данных из JSON/админки (то же, что normalizeTariffId). */
+export const normalizeStoredTariffId = normalizeTariffId
+
+/** Ключ строки в TARIFF_LIMITS (корпоративные → pro / pro_plus). */
+export const normalizeTariffIdForLimits = getLimitsLookupKey
+
 export const TARIFF_IDS = {
   FREE: 'free',
   PRO: 'pro',
   PRO_PLUS: 'pro_plus',
-  ADMIN: 'admin'
-}
-
-/**
- * Приводит значение тарифа из БД/админки к одному из: free | pro | pro_plus | admin.
- * Учитывает регистр, пробелы и частые варианты записи (старые данные, ручной ввод).
- */
-export function normalizeStoredTariffId(raw) {
-  if (raw == null || raw === '') return 'free'
-  const s = String(raw).trim().toLowerCase()
-  if (s === 'free' || s === 'бесплатный') return 'free'
-  if (s === 'pro' || s === 'про') return 'pro'
-  if (s === 'pro_plus' || s === 'pro-plus' || s === 'proplus' || s === 'про+') return 'pro_plus'
-  if (s === 'admin' || s === 'ultima') return 'admin'
-  return 'free'
-}
-
-/** Алиас: лимиты и политики считают по нормализованному id */
-export function normalizeTariffIdForLimits(id) {
-  return normalizeStoredTariffId(id)
+  ADMIN: 'admin',
+  CORPORATE_PRO: 'corporate_pro',
+  CORPORATE_PRO_PLUS: 'corporate_pro_plus'
 }
 
 export const TARIFFS = [
@@ -86,13 +79,43 @@ export const TARIFFS = [
       'Выдаётся только администратором'
     ],
     limits: {}
+  },
+  {
+    id: TARIFF_IDS.CORPORATE_PRO,
+    name: 'Корпоративный Про',
+    badge: 'Корп. Про',
+    priceMonth: 0,
+    priceYear: 0,
+    purchasable: false,
+    adminOnly: true,
+    features: [
+      'Возможности тарифа Про для команды',
+      'Оплата по счёту, подключение через администратора'
+    ],
+    limits: {}
+  },
+  {
+    id: TARIFF_IDS.CORPORATE_PRO_PLUS,
+    name: 'Корпоративный Про+',
+    badge: 'Корп. Про+',
+    priceMonth: 0,
+    priceYear: 0,
+    purchasable: false,
+    adminOnly: true,
+    features: [
+      'Возможности тарифа Про+ для команды',
+      'Оплата по счёту, подключение через администратора'
+    ],
+    limits: {}
   }
 ]
 
 export function getTariffById(id) {
-  const n = normalizeStoredTariffId(id)
+  const n = normalizeTariffId(id)
   if (n === 'free') return TARIFFS.find(t => t.id === 'free')
   if (n === 'admin') return TARIFFS.find(t => t.id === 'admin')
+  if (n === 'corporate_pro_plus') return TARIFFS.find(t => t.id === 'corporate_pro_plus')
+  if (n === 'corporate_pro') return TARIFFS.find(t => t.id === 'corporate_pro')
   if (n === 'pro_plus') return TARIFFS.find(t => t.id === 'pro_plus')
   if (n === 'pro') return TARIFFS.find(t => t.id === 'pro')
   return TARIFFS.find(t => t.id === 'free')

@@ -1,0 +1,155 @@
+.corporate-price-block {
+  margin-top: auto;
+  padding-top: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.corporate-price-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.88rem;
+  color: #475569;
+}
+
+.corporate-price-num {
+  font-weight: 600;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.corporate-price-users {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.corporate-price-users-label {
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.corporate-price-users-ctrl {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid rgba(2, 132, 199, 0.35);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.corporate-price-step {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  background: rgba(2, 132, 199, 0.08);
+  color: #0369a1;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.corporate-price-step:hover {
+  background: rgba(2, 132, 199, 0.18);
+}
+
+.corporate-price-users-input {
+  width: 3rem;
+  border: none;
+  text-align: center;
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  padding: 0.35rem 0;
+  font-family: inherit;
+  color: #0f172a;
+}
+
+.corporate-price-users-input:focus {
+  outline: none;
+}
+
+/* убрать стрелки number */
+.corporate-price-users-input::-webkit-outer-spin-button,
+.corporate-price-users-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.corporate-price-users-input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.corporate-price-total {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #0c4a6e;
+  font-variant-numeric: tabular-nums;
+  padding-top: 0.15rem;
+}
+
+/* Лендинг */
+.corporate-price-block--landing .corporate-price-row {
+  font-size: 0.9rem;
+}
+
+.corporate-price-block--landing .corporate-price-total {
+  font-size: 1.1rem;
+}
+
+/* Кабинет */
+.corporate-price-block--cabinet .corporate-price-row {
+  font-size: 0.82rem;
+}
+
+.corporate-price-block--cabinet .corporate-price-total {
+  font-size: 1rem;
+}
+
+.corporate-price-block--cabinet .corporate-price-step {
+  width: 1.85rem;
+  height: 1.85rem;
+  font-size: 1rem;
+}
+
+.corporate-price-block--cabinet .corporate-price-users-input {
+  width: 2.75rem;
+  font-size: 0.88rem;
+}
+
+/* Превью в редакторе */
+.corporate-price-block--preview .corporate-price-row {
+  font-size: 0.52rem;
+}
+
+.corporate-price-block--preview .corporate-price-users-label {
+  font-size: 0.5rem;
+}
+
+.corporate-price-block--preview .corporate-price-step {
+  width: 1.1rem;
+  height: 1.1rem;
+  font-size: 0.65rem;
+}
+
+.corporate-price-block--preview .corporate-price-users-input {
+  width: 1.5rem;
+  font-size: 0.55rem;
+  padding: 0.15rem 0;
+}
+
+.corporate-price-block--preview .corporate-price-total {
+  font-size: 0.62rem;
+}
+
+.corporate-price-block--preview .corporate-price-users-ctrl {
+  border-radius: 4px;
+}

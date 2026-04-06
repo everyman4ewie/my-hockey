@@ -144,7 +144,12 @@ function interpolateIconEntity(ia, ib, t) {
     color: t < 0.5 ? ia.color : ib.color,
     num: t < 0.5 ? ia.num : ib.num
   }
-  if (ia.type === 'goal') {
+  if (
+    ia.type === 'goal' ||
+    ia.type === 'barrier' ||
+    /* sync with icon3dAssets ICON_TYPES_3D_ROTATABLE_PERSON */
+    ['player', 'playerTriangle', 'forward', 'defender', 'coach', 'goalkeeper'].includes(ia.type)
+  ) {
     out.angle = interpolateAngles(ia.angle, ib.angle, t)
   }
   return out

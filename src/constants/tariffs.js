@@ -1,15 +1,10 @@
 /**
  * Тарифные планы: Бесплатный, Про, Про+ (покупка), По выдаче админа.
+ * Нормализация id тарифа — shared/tariffNormalize.js (единый источник с сервером).
  */
-export function normalizeTariffId(id) {
-  if (id == null || id === '') return 'free'
-  const s = typeof id === 'string' ? id.trim().toLowerCase() : String(id)
-  if (s === 'free' || s === 'бесплатный') return 'free'
-  if (s === 'pro' || s === 'про') return 'pro'
-  if (s === 'pro_plus' || s === 'pro-plus' || s === 'proplus' || s === 'про+') return 'pro_plus'
-  if (s === 'admin' || s === 'ultima') return 'admin'
-  return 'free'
-}
+import { normalizeTariffId } from '../../shared/tariffNormalize.js'
+
+export { normalizeTariffId }
 
 export const TARIFFS = [
   {
@@ -80,13 +75,62 @@ export const TARIFFS = [
     limits: {},
     buyable: false,
     adminOnly: true
+  },
+  {
+    id: 'corporate_pro',
+    name: 'Корпоративный Про',
+    badge: 'Корп. Про',
+    badgeClass: 'pro',
+    priceMonth: 0,
+    priceYear: 0,
+    description: 'Команда на базе тарифа Про. Оплата по счёту.',
+    features: [
+      'Возможности Про для участников организации',
+      'Подключение через администратора после оплаты счёта'
+    ],
+    limits: {},
+    buyable: false,
+    adminOnly: true
+  },
+  {
+    id: 'corporate_pro_plus',
+    name: 'Корпоративный Про+',
+    badge: 'Корп. Про+',
+    badgeClass: 'pro-plus',
+    priceMonth: 0,
+    priceYear: 0,
+    description: 'Команда на базе тарифа Про+. Оплата по счёту.',
+    features: [
+      'Возможности Про+ для участников организации',
+      'Подключение через администратора после оплаты счёта'
+    ],
+    limits: {},
+    buyable: false,
+    adminOnly: true
   }
 ]
+
+/**
+ * Тариф для бейджей и подписей: у участников организации — tier организации (Корп. Про / Корп. Про+),
+ * у остальных — эффективный тариф. Поля user (сессия / логин) учитываются, пока профиль ещё не подгрузился.
+ */
+export function getDisplayTariffId({ isAdmin, viewAsIsNull, profile, user }) {
+  if (isAdmin && viewAsIsNull) return 'admin'
+  const org = profile?.organization ?? user?.organization
+  if (org?.tier && org.subscriptionActive !== false) {
+    return org.tier === 'corporate_pro_plus' ? 'corporate_pro_plus' : 'corporate_pro'
+  }
+  return normalizeTariffId(
+    profile?.effectiveTariff ?? user?.effectiveTariff ?? profile?.tariff ?? user?.tariff ?? 'free'
+  )
+}
 
 export const getTariffById = (id) => {
   const n = normalizeTariffId(id)
   if (n === 'free') return TARIFFS.find(t => t.id === 'free')
   if (n === 'admin') return TARIFFS.find(t => t.id === 'admin')
+  if (n === 'corporate_pro_plus') return TARIFFS.find(t => t.id === 'corporate_pro_plus')
+  if (n === 'corporate_pro') return TARIFFS.find(t => t.id === 'corporate_pro')
   if (n === 'pro_plus') return TARIFFS.find(t => t.id === 'pro_plus')
   if (n === 'pro') return TARIFFS.find(t => t.id === 'pro')
   return TARIFFS.find(t => t.id === 'free')

@@ -19,7 +19,7 @@ import {
   Eye,
   ArrowLeft
 } from 'lucide-react'
-import { getTariffById, normalizeTariffId } from '../constants/tariffs'
+import { getTariffById, normalizeTariffId, getDisplayTariffId } from '../constants/tariffs'
 import { libraryLockedUserMessage, LIBRARY_PLAN_QUOTA_EXCEEDED_MESSAGE } from '../utils/libraryLockedMessage'
 import './Cabinet.css'
 import { cloneLibraryExercisesForBoard } from '../utils/libraryExerciseClone'
@@ -45,10 +45,12 @@ export default function LibraryPage() {
   const { canvasSize } = useCanvasSettings()
   const navigate = useNavigate()
 
-  const assignedTariffId =
-    user?.isAdmin && authFetchOpts.viewAs == null
-      ? 'admin'
-      : normalizeTariffId(profile?.tariff ?? user?.tariff ?? profile?.effectiveTariff ?? 'free')
+  const assignedTariffId = getDisplayTariffId({
+    isAdmin: user?.isAdmin,
+    viewAsIsNull: authFetchOpts.viewAs == null,
+    profile,
+    user
+  })
   const assignedTariffInfo = getTariffById(assignedTariffId)
 
   /** Тариф для лимитов (как в кабинете): effective при приостановке → free */

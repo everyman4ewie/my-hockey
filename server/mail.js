@@ -292,6 +292,68 @@ async function sendPasswordResetViaResend({ from, to, subject, text, html }) {
   }
 }
 
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * Универсальная отправка (Resend → SMTP fallback).
+ * @param {{ from: string, to: string, subject: string, text: string, html: string }} mail
+ * @param {string} [logLabel] — метка в логе
+ */
+export async function sendTransactionalEmail(mail, logLabel = 'transactional') {
+  const { from, to } = mail
+  if (!from || !to) throw new Error('sendTransactionalEmail: from/to обязательны')
+
+  if (isResendConfigured()) {
+    try {
+      await sendPasswordResetViaResend(mail)
+      console.log(
+        `[mail] ${logLabel}: Resend →`,
+        String(to).replace(/(^.).*(@.*$)/, '$1***$2')
+      )
+      return
+    } catch (e) {
+      console.error('[mail] Resend:', e instanceof Error ? e.message : e)
+      const baseOpts = buildTransportOptions()
+      if (!baseOpts) throw e
+      console.warn('[mail] повтор через SMTP (fallback)')
+    }
+  }
+
+  const baseOpts = buildTransportOptions()
+  if (!baseOpts) {
+    throw new Error(
+      'Почта не настроена: задайте RESEND_API_KEY или SMTP_* (с VPS часто недоступен SMTP — используйте Resend).'
+    )
+  }
+
+  const steps = buildSmtpAttemptSteps(baseOpts)
+  let lastErr
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i]
+    const t = await createTransportForSend(s.opts, { forceIpv4: s.forceIpv4 })
+    if (!t) continue
+    try {
+      if (i > 0) console.warn('[mail] SMTP retry', s.name, '—', formatSmtpError(lastErr))
+      await t.sendMail(mail)
+      t.close()
+      console.log(`[mail] ${logLabel}: SMTP`)
+      return
+    } catch (err) {
+      lastErr = err
+      t.close()
+      if (!smtpFailureWorth587Retry(err)) throw err
+    }
+  }
+  if (lastErr) throw lastErr
+  throw new Error('SMTP: не удалось отправить')
+}
+
 /**
  * @param {{ to: string, resetUrl: string, login?: string }} opts
  */
@@ -325,15 +387,63 @@ export async function sendPasswordResetEmail({ to, resetUrl, login }) {
     <p style="font-size:12px;color:#64748b;">Если вы не запрашивали сброс, проигнорируйте письмо.</p>
   `
 
+  await sendTransactionalEmail({ from, to, subject, text, html }, 'сброс пароля')
+}
+
+/** Ссылка на личный кабинет, раздел «Тарифы». */
+export function buildCabinetTariffsUrl() {
+  const base = getPublicBaseUrl()
+  return base ? `${base}/cabinet?section=tariffs` : ''
+}
+
+/** Для напоминаний о подписке: нужны публичный URL, SMTP/Resend и MAIL_FROM. */
+export function isSubscriptionEmailsConfigured() {
+  return !!buildCabinetTariffsUrl() && hasMailFromConfigured() && (isResendConfigured() || isSmtpConfigured())
+}
+
+/**
+ * Заявка на корпоративный тариф — письмо на info@my-hockey.ru (или CORPORATE_QUOTE_EMAIL).
+ */
+export async function sendCorporateQuoteEmail(payload) {
+  const to = (process.env.CORPORATE_QUOTE_EMAIL || 'info@my-hockey.ru').trim()
+  const from = (process.env.MAIL_FROM || process.env.RESEND_FROM || process.env.SMTP_USER || '').trim()
+  if (!from) throw new Error('Задайте MAIL_FROM или RESEND_FROM в .env')
+
+  const siteName = (process.env.MAIL_SITE_NAME || 'Hockey Tactics').trim()
+  const tierLabel = payload.tier === 'corporate_pro_plus' ? 'Корпоративный Про+' : 'Корпоративный Про'
+  const subject = `Заявка: ${tierLabel} — ${siteName}`
+
+  const lines = [
+    'Заявка на корпоративный тариф',
+    '',
+    `Уровень: ${tierLabel}`,
+    `Организация: ${payload.organizationName}`,
+    `Контактное лицо: ${payload.contactName}`,
+    `Email: ${payload.email}`,
+    `Телефон: ${payload.phone}`,
+    `ИНН: ${payload.inn}`,
+    payload.seats ? `Планируемое число мест: ${payload.seats}` : null,
+    payload.comment ? `Комментарий:\n${payload.comment}` : null,
+    '',
+    payload.requesterLogin
+      ? `Заявитель в системе: ${payload.requesterLogin} (id: ${payload.requesterId != null ? payload.requesterId : '—'})`
+      : 'Заявка без авторизации на сайте.',
+    ''
+  ].filter(Boolean)
+  const text = lines.join('\n')
+  const html = `<pre style="white-space:pre-wrap;font-family:system-ui,sans-serif;font-size:14px;line-height:1.5">${escapeHtml(
+    text
+  )}</pre>`
+
   const mail = { from, to, subject, text, html }
 
   if (isResendConfigured()) {
     try {
       await sendPasswordResetViaResend(mail)
-      console.log('[mail] сброс пароля: отправлено через Resend →', String(to).replace(/(^.).*(@.*$)/, '$1***$2'))
+      console.log('[mail] корпоративная заявка: Resend →', String(to).replace(/(^.).*(@.*$)/, '$1***$2'))
       return
     } catch (e) {
-      console.error('[mail] Resend:', e instanceof Error ? e.message : e)
+      console.error('[mail] Resend (corporate):', e instanceof Error ? e.message : e)
       const baseOpts = buildTransportOptions()
       if (!baseOpts) throw e
       console.warn('[mail] повтор через SMTP (fallback)')
@@ -357,7 +467,7 @@ export async function sendPasswordResetEmail({ to, resetUrl, login }) {
       if (i > 0) console.warn('[mail] SMTP retry', s.name, '—', formatSmtpError(lastErr))
       await t.sendMail(mail)
       t.close()
-      console.log('[mail] сброс пароля: отправлено через SMTP')
+      console.log('[mail] корпоративная заявка: отправлено через SMTP')
       return
     } catch (err) {
       lastErr = err
@@ -367,12 +477,4 @@ export async function sendPasswordResetEmail({ to, resetUrl, login }) {
   }
   if (lastErr) throw lastErr
   throw new Error('SMTP: не удалось отправить')
-}
-
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
 }

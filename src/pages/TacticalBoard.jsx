@@ -8,7 +8,11 @@ import { checkUsageBeforeDownload } from '../utils/usageCheck'
 import { authFetch } from '../utils/authFetch'
 import { useAuthFetchOpts } from '../hooks/useAuthFetchOpts'
 import { useProfile } from '../hooks/useProfile'
-import { getTariffLimits } from '../constants/tariffLimits'
+import {
+  getTariffLimits,
+  canUseBoard3dVisualization,
+  BOARD_3D_TARIFF_MESSAGE
+} from '../constants/tariffLimits'
 import { useCanvasSettings } from '../hooks/useCanvasSettings'
 import { useMediaQuery } from '../hooks/useMediaQuery'
 import { newEntityId } from '../utils/boardEntityId'
@@ -22,9 +26,16 @@ import {
 import { FIELD_OPTIONS } from '../components/FieldZoneSelector/FieldZoneSelector'
 import { isFieldZoneLockedForTariff, FIELD_ZONE_UPGRADE_TOOLTIP } from '../constants/fieldZones'
 import { LIBRARY_BOARD_IMPORT_KEY } from '../utils/libraryBoardImport'
+import { reportBoard3dUsageOnce } from '../utils/analyticsBoard3d'
 import { openLibraryOrWarn } from '../utils/libraryDesktopOnly'
+import { usePreloadIcon3dWhenIdle } from '../hooks/usePreloadIcon3dWhenIdle'
 import '../components/FieldZoneSelector/FieldZoneSelector.css'
 import './TacticalBoard.css'
+import {
+  Board2D3DShell,
+  BoardViewModeHeaderToggle,
+  Rink3DViewSuspense
+} from '../components/Rink3D/Board2D3DShell.jsx'
 
 const RINK_IMG = '/assets/hockey-rink.png'
 
@@ -38,7 +49,7 @@ export default function TacticalBoard() {
   const { getToken, user } = useAuth()
   const authFetchOpts = useAuthFetchOpts()
   const { profile } = useProfile()
-  const { canvasBackgrounds, canvasSize: canvasSizeSettings } = useCanvasSettings()
+  const { canvasBackgrounds, canvas3dLayouts, canvasSize: canvasSizeSettings } = useCanvasSettings()
   const [limitModal, setLimitModal] = useState({ open: false, message: '' })
   const containerRef = useRef(null)
   const headerRef = useRef(null)
@@ -54,6 +65,22 @@ export default function TacticalBoard() {
   layersRef.current = layers
   const [activeLayerId, setActiveLayerId] = useState('layer-1')
   const [fieldZone, setFieldZone] = useState('full')
+  const [viewMode, setViewMode] = useState('2d')
+  const isMobileShell = useMediaQuery('(max-width: 768px)')
+  /** 3D на телефонах отключён (WebGL/жесты/производительность). */
+  const view3dAvailable = fieldZone === 'full' && !isMobileShell
+  const tariffAllows3d = canUseBoard3dVisualization(profile?.effectiveTariff ?? profile?.tariff)
+  const view3dUsable = view3dAvailable && tariffAllows3d
+  const board3dTariffLocked = view3dAvailable && !tariffAllows3d
+  const boardViewMode = view3dUsable ? viewMode : '2d'
+  useEffect(() => {
+    if (!view3dUsable && viewMode === '3d') setViewMode('2d')
+  }, [view3dUsable, viewMode])
+  useEffect(() => {
+    if (boardViewMode === '3d') reportBoard3dUsageOnce('tactical-board')
+  }, [boardViewMode])
+
+  usePreloadIcon3dWhenIdle(view3dUsable && fieldZone === 'full', {})
   const [fieldSelectOpen, setFieldSelectOpen] = useState(false)
   const [layersOpen, setLayersOpen] = useState(false)
   const [loading, setLoading] = useState(!!id)
@@ -322,6 +349,32 @@ export default function TacticalBoard() {
     [canvasSize.w, canvasSize.h, activeLayerId]
   )
 
+  const handleIconMove3d = useCallback(
+    (iconId, u, v) => {
+      setLayers((prev) =>
+        prev.map((l) => {
+          if (l.id !== activeLayerId) return l
+          const icons = (l.icons || []).map((ic) =>
+            ic.id === iconId ? { ...ic, x: u, y: v } : ic
+          )
+          return { ...l, icons }
+        })
+      )
+    },
+    [activeLayerId]
+  )
+
+  const layers3d = useMemo(
+    () =>
+      layers.map((l) => ({
+        id: l.id,
+        paths: l.paths || [],
+        icons: l.icons || [],
+        dimmed: l.id !== activeLayerId
+      })),
+    [layers, activeLayerId]
+  )
+
   const pathsPx = useMemo(() => denormalizePaths(paths, canvasSize.w, canvasSize.h), [paths, canvasSize.w, canvasSize.h])
   const iconsPx = useMemo(() => denormalizeIcons(icons, canvasSize.w, canvasSize.h), [icons, canvasSize.w, canvasSize.h])
 
@@ -365,7 +418,6 @@ export default function TacticalBoard() {
     setLayers((prev) => prev.map((l) => ({ ...l, paths: [], icons: [] })))
   }, [])
 
-  const isMobileShell = useMediaQuery('(max-width: 768px)')
   const boardLimits = getTariffLimits(profile.effectiveTariff ?? profile.tariff)
   const canDownloadPng = boardLimits.maxBoardDownloads !== 0
   const handleDownloadPng = useCallback(async (canvas) => {
@@ -400,6 +452,15 @@ export default function TacticalBoard() {
           <h1 className="tactical-board-title">Тактическая доска</h1>
           <div className="tactical-board-header-actions">
             {error && <span className="tactical-board-error">{error}</span>}
+            <BoardViewModeHeaderToggle
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              view3dAvailable={view3dAvailable}
+              board3dTariffLocked={board3dTariffLocked}
+              onBoard3dLockedAttempt={() =>
+                setLimitModal({ open: true, message: BOARD_3D_TARIFF_MESSAGE })
+              }
+            />
             <button type="button" className="btn-outline" onClick={() => navigate(user?.isAdmin ? '/admin' : '/cabinet')}>
               К кабинету
             </button>
@@ -421,9 +482,31 @@ export default function TacticalBoard() {
             {error}
           </div>
         )}
-        <HockeyBoard
+        <Board2D3DShell
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          view3dAvailable={view3dAvailable}
+          board3dTariffLocked={board3dTariffLocked}
+          onBoard3dLockedAttempt={() =>
+            setLimitModal({ open: true, message: BOARD_3D_TARIFF_MESSAGE })
+          }
+        >
+          <HockeyBoard
           ref={boardRef}
+          reserveFixedToolbarPadding={!isMobileShell}
           canvasId="tactical-board-canvas"
+          boardViewMode={boardViewMode}
+          threeDContent={
+            <Rink3DViewSuspense
+              layers={layers3d}
+              fieldZone={fieldZone}
+              canvas3dLayouts={canvas3dLayouts || {}}
+              onIconMove={handleIconMove3d}
+              interactive
+              canvasRefWidth={canvasSize.w}
+              canvasRefHeight={canvasSize.h}
+            />
+          }
           paths={pathsPx}
           icons={iconsPx}
           onChange={handleChange}
@@ -618,6 +701,7 @@ export default function TacticalBoard() {
             </div>
           }
         />
+        </Board2D3DShell>
       </div>
     </div>
   )

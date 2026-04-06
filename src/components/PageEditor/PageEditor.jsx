@@ -1,13 +1,21 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Target, FileText, Download, Award, Zap, Shield, Image, Video } from 'lucide-react'
-import { TARIFFS } from '../../constants/tariffs'
+import { TARIFFS, getTariffById } from '../../constants/tariffs'
 import { LANDING_FEATURES_DEFAULTS } from '../../constants/landingFeaturesDefaults'
 import { mergeEditorFeatures } from '../../utils/mergeLandingFeatures'
+import {
+  LANDING_TARIFF_IDS,
+  LANDING_CORPORATE_TARIFF_IDS,
+  mergeEditorTariffFeatures,
+  getTariffLandingFeatures
+} from '../../utils/tariffLandingFeatures'
+import { RINK3D_PRESETS, parseCanvas3dLayout } from '../Rink3D/rink3dPresets'
+import CorporatePriceBlock from '../CorporatePriceBlock/CorporatePriceBlock'
 import './PageEditor.css'
 
-const LANDING_TARIFF_IDS = ['free', 'pro', 'pro_plus']
-const LANDING_TARIFFS = LANDING_TARIFF_IDS.map((id) => TARIFFS.find((t) => t.id === id)).filter(Boolean)
+const LANDING_EDITOR_TARIFF_IDS = [...LANDING_TARIFF_IDS, ...LANDING_CORPORATE_TARIFF_IDS]
+const LANDING_TARIFFS = LANDING_EDITOR_TARIFF_IDS.map((id) => TARIFFS.find((t) => t.id === id)).filter(Boolean)
 const TARIFFS_REGISTER_HREF = `/register?redirect=${encodeURIComponent('/cabinet?section=tariffs')}`
 
 function formatPreviewTariffPrice(tariff, billingPeriod) {
@@ -31,6 +39,7 @@ const defaultPages = {
   logoUrl: '',
   faviconUrl: '',
   canvasBackgrounds: {},
+  canvas3dLayouts: {},
   canvasSize: { width: 800, height: 400 },
   heroTitle: 'План-конспекты и тактические доски для хоккеистов',
   heroSubtitle: 'Схемы на льду, план-конспекты, тактическое видео со скачиванием MP4 — всё для тренеров и команд.',
@@ -54,7 +63,8 @@ const defaultPages = {
   footerLegalInn: 'ИНН: 760402772519',
   footerLegalOgrnip: 'ОГРНИП: 325762700040692',
   footerText: '© Hockey Tactics — платформа для тренеров и хоккеистов',
-  features: LANDING_FEATURES_DEFAULTS.map((f) => ({ ...f }))
+  features: LANDING_FEATURES_DEFAULTS.map((f) => ({ ...f })),
+  tariffLandingFeatures: {}
 }
 
 const TABS = [
@@ -78,6 +88,19 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
   const [activeTab, setActiveTab] = useState('brand')
   const displayPages = { ...defaultPages, ...pages }
   const features = mergeEditorFeatures(displayPages.features, LANDING_FEATURES_DEFAULTS)
+  const tariffFeaturesById = mergeEditorTariffFeatures(displayPages.tariffLandingFeatures)
+
+  function setTariffLandingLines(tariffId, lines) {
+    onChange((p) => ({
+      ...p,
+      tariffLandingFeatures: { ...(p.tariffLandingFeatures || {}), [tariffId]: lines }
+    }))
+  }
+
+  function resetTariffLandingLines(tariffId) {
+    const t = TARIFFS.find((x) => x.id === tariffId)
+    setTariffLandingLines(tariffId, [...(t?.features || [])])
+  }
 
   function updateFeatures(newFeatures) {
     onChange(p => ({ ...p, features: newFeatures }))
@@ -260,12 +283,89 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
           )}
 
           {activeTab === 'tariffs' && (
-            <div className="page-editor-fields">
+            <div className="page-editor-fields page-editor-tariffs-fields">
               <p className="form-hint page-editor-tariffs-hint">
-                Тексты списков, цены и состав тарифов на лендинге берутся из{' '}
-                <code>src/constants/tariffs.js</code> (как на главной странице). Здесь в превью справа
-                отображается актуальный блок «Тарифы» с переключателем месяц/год.
+                Редактируются только <strong>пункты списка преимуществ</strong> на лендинге. Названия тарифов, цены и
+                описание под заголовком карточки по-прежнему задаются в <code>src/constants/tariffs.js</code>.
               </p>
+              {LANDING_TARIFFS.map((t) => {
+                const lines = tariffFeaturesById[t.id] || []
+                return (
+                  <div key={t.id} className="page-editor-tariff-block">
+                    <div className="page-editor-tariff-block-head">
+                      <h4 className="page-editor-tariff-block-title">{t.name}</h4>
+                      <button
+                        type="button"
+                        className="btn-outline btn-sm"
+                        onClick={() => resetTariffLandingLines(t.id)}
+                      >
+                        Как в коде
+                      </button>
+                    </div>
+                    <div className="page-editor-tariff-bullets">
+                      {lines.map((line, idx) => (
+                        <div key={`${t.id}-line-${idx}`} className="page-editor-tariff-bullet-row">
+                          <textarea
+                            className="admin-textarea page-editor-tariff-bullet-text"
+                            rows={2}
+                            value={line}
+                            onChange={(e) => {
+                              const next = [...lines]
+                              next[idx] = e.target.value
+                              setTariffLandingLines(t.id, next)
+                            }}
+                            placeholder="Текст пункта"
+                          />
+                          <div className="page-editor-tariff-bullet-actions">
+                            <button
+                              type="button"
+                              className="btn-outline btn-sm"
+                              disabled={idx === 0}
+                              title="Выше"
+                              onClick={() => {
+                                if (idx === 0) return
+                                const next = [...lines]
+                                ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
+                                setTariffLandingLines(t.id, next)
+                              }}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-outline btn-sm"
+                              disabled={idx >= lines.length - 1}
+                              title="Ниже"
+                              onClick={() => {
+                                if (idx >= lines.length - 1) return
+                                const next = [...lines]
+                                ;[next[idx + 1], next[idx]] = [next[idx], next[idx + 1]]
+                                setTariffLandingLines(t.id, next)
+                              }}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-outline btn-sm page-editor-tariff-remove"
+                              onClick={() => setTariffLandingLines(t.id, lines.filter((_, i) => i !== idx))}
+                            >
+                              Удалить
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      <button
+                        type="button"
+                        className="btn-outline btn-sm page-editor-tariff-add"
+                        onClick={() => setTariffLandingLines(t.id, [...lines, ''])}
+                      >
+                        + Пункт
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -523,45 +623,102 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
               ].map(({ id, label }) => {
                 const bgs = displayPages.canvasBackgrounds || {}
                 const url = bgs[id] || ''
+                const c3raw = (displayPages.canvas3dLayouts || {})[id] || ''
+                const { preset: preset3d, glbUrl: glbUrl3d } = parseCanvas3dLayout(c3raw)
+                const setLayout3d = (nextPreset, nextGlb) => {
+                  const payload = JSON.stringify({
+                    preset: nextPreset || 'default',
+                    glbUrl: typeof nextGlb === 'string' ? nextGlb : ''
+                  })
+                  onChange((p) => ({
+                    ...p,
+                    canvas3dLayouts: { ...(p.canvas3dLayouts || {}), [id]: payload }
+                  }))
+                }
                 return (
-                  <div key={id} className="form-row canvas-bg-row">
-                    <label>{label}</label>
-                    <div className="logo-upload-wrap">
-                      {url ? (
-                        <div className="canvas-bg-preview-row">
-                          <img src={url} alt="" className="canvas-bg-preview" />
-                          <button
-                            type="button"
-                            className="btn-outline btn-sm"
-                            onClick={() => onChange(p => ({
-                              ...p,
-                              canvasBackgrounds: { ...(p.canvasBackgrounds || {}), [id]: '' }
-                            }))}
-                          >
-                            Удалить
-                          </button>
-                        </div>
-                      ) : (
-                        <label className="logo-upload-label">
+                  <div key={id} className="canvas-zone-block">
+                    <div className="form-row canvas-bg-row">
+                      <label>{label}</label>
+                      <div className="logo-upload-wrap">
+                        {url ? (
+                          <div className="canvas-bg-preview-row">
+                            <img src={url} alt="" className="canvas-bg-preview" />
+                            <button
+                              type="button"
+                              className="btn-outline btn-sm"
+                              onClick={() =>
+                                onChange((p) => ({
+                                  ...p,
+                                  canvasBackgrounds: { ...(p.canvasBackgrounds || {}), [id]: '' }
+                                }))
+                              }
+                            >
+                              Удалить
+                            </button>
+                          </div>
+                        ) : (
+                          <label className="logo-upload-label">
+                            <input
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0]
+                                if (!file || !file.type.startsWith('image/')) return
+                                const reader = new FileReader()
+                                reader.onload = () =>
+                                  onChange((p) => ({
+                                    ...p,
+                                    canvasBackgrounds: { ...(p.canvasBackgrounds || {}), [id]: reader.result }
+                                  }))
+                                reader.readAsDataURL(file)
+                              }}
+                              hidden
+                            />
+                            <Image size={18} style={{ marginRight: 6 }} />
+                            Загрузить изображение
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                    <div className="form-row canvas-bg-row canvas-3d-layout-row">
+                      <label>3D ({label})</label>
+                      <div className="canvas-3d-layout-controls">
+                        <select
+                          className="canvas-3d-preset-select"
+                          value={preset3d === 'minimal' ? 'minimal' : 'default'}
+                          onChange={(e) => setLayout3d(e.target.value, glbUrl3d)}
+                        >
+                          {RINK3D_PRESETS.map((pr) => (
+                            <option key={pr.id} value={pr.id}>
+                              {pr.label}
+                            </option>
+                          ))}
+                        </select>
+                        <label className="logo-upload-label canvas-3d-glb-btn">
                           <input
                             type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            onChange={e => {
+                            accept=".glb,.gltf,model/gltf-binary,model/gltf+json"
+                            onChange={(e) => {
                               const file = e.target.files?.[0]
-                              if (!file || !file.type.startsWith('image/')) return
+                              if (!file) return
                               const reader = new FileReader()
-                              reader.onload = () => onChange(p => ({
-                                ...p,
-                                canvasBackgrounds: { ...(p.canvasBackgrounds || {}), [id]: reader.result }
-                              }))
+                              reader.onload = () => setLayout3d(preset3d, reader.result)
                               reader.readAsDataURL(file)
                             }}
                             hidden
                           />
-                          <Image size={18} style={{ marginRight: 6 }} />
-                          Загрузить изображение
+                          GLB
                         </label>
-                      )}
+                        {glbUrl3d ? (
+                          <button
+                            type="button"
+                            className="btn-outline btn-sm"
+                            onClick={() => setLayout3d(preset3d, '')}
+                          >
+                            Сбросить GLB
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 )
@@ -625,15 +782,16 @@ export default function PageEditor({ pages, onChange, onSave, saving, success })
           </a>
         </div>
         <div className="page-editor-preview-frame">
-          <LandingPreviewContent pages={displayPages} features={features} />
+          <LandingPreviewContent pages={displayPages} features={features} tariffFeaturesById={tariffFeaturesById} />
         </div>
       </div>
     </div>
   )
 }
 
-function LandingPreviewContent({ pages, features }) {
+function LandingPreviewContent({ pages, features, tariffFeaturesById }) {
   const [billingPeriod, setBillingPeriod] = useState('year')
+  const [corporateTier, setCorporateTier] = useState('corporate_pro')
 
   const socialItems = [
     { url: pages.contactsSocialVkUrl ?? defaultPages.contactsSocialVkUrl, label: pages.contactsSocialVkLabel ?? defaultPages.contactsSocialVkLabel },
@@ -710,23 +868,57 @@ function LandingPreviewContent({ pages, features }) {
             </button>
           </div>
         </div>
-        <div className="landing-preview-price-grid">
-          {LANDING_TARIFFS.map((t) => (
-            <div key={t.id} className={`landing-preview-tcard ${t.id === 'pro' ? 'landing-preview-tcard--popular' : ''}`}>
-              {t.id === 'pro' && <div className="landing-preview-tcard-popular">Популярный</div>}
-              <Link to={TARIFFS_REGISTER_HREF} className="landing-preview-tcard-head">
-                <span className="landing-preview-tcard-name">{t.name}</span>
-                <span className="landing-preview-tcard-choose">Выбрать</span>
-              </Link>
-              <p className="landing-preview-tcard-tagline">{t.description}</p>
-              <ul className="landing-preview-tcard-features">
-                {t.features.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-              <p className="landing-preview-tcard-price">{formatPreviewTariffPrice(t, billingPeriod)}</p>
+        <div className="landing-preview-price-grid landing-preview-price-grid--four">
+          {LANDING_TARIFF_IDS.map((tid) => {
+            const t = TARIFFS.find((x) => x.id === tid)
+            if (!t) return null
+            return (
+              <div key={t.id} className={`landing-preview-tcard ${t.id === 'pro' ? 'landing-preview-tcard--popular' : ''}`}>
+                {t.id === 'pro' && <div className="landing-preview-tcard-popular">Популярный</div>}
+                <Link to={TARIFFS_REGISTER_HREF} className="landing-preview-tcard-head">
+                  <span className="landing-preview-tcard-name">{t.name}</span>
+                  <span className="landing-preview-tcard-choose">Выбрать</span>
+                </Link>
+                <p className="landing-preview-tcard-tagline">{t.description}</p>
+                <ul className="landing-preview-tcard-features">
+                  {(tariffFeaturesById[t.id] || t.features).map((line, i) => (
+                    <li key={`${t.id}-${i}`}>{line}</li>
+                  ))}
+                </ul>
+                <p className="landing-preview-tcard-price">{formatPreviewTariffPrice(t, billingPeriod)}</p>
+              </div>
+            )
+          })}
+          <div className="landing-preview-tcard landing-preview-tcard--corporate">
+            <div className="landing-preview-tcard-head landing-preview-tcard-head--static">
+              <span className="landing-preview-tcard-name">Корпоративный</span>
             </div>
-          ))}
+            <div className="landing-preview-corporate-toggle" role="group" aria-label="Корпоративный уровень">
+              <button
+                type="button"
+                className={corporateTier === 'corporate_pro' ? 'active' : ''}
+                onClick={() => setCorporateTier('corporate_pro')}
+              >
+                Про
+              </button>
+              <button
+                type="button"
+                className={corporateTier === 'corporate_pro_plus' ? 'active' : ''}
+                onClick={() => setCorporateTier('corporate_pro_plus')}
+              >
+                Про+
+              </button>
+            </div>
+            <p className="landing-preview-tcard-tagline">{getTariffById(corporateTier)?.description}</p>
+            <ul className="landing-preview-tcard-features">
+              {getTariffLandingFeatures(corporateTier, pages.tariffLandingFeatures).map((line, i) => (
+                <li key={`corp-${corporateTier}-${i}`}>{line}</li>
+              ))}
+            </ul>
+            <div className="landing-preview-tcard-price landing-preview-tcard-price--corporate">
+              <CorporatePriceBlock tierId={corporateTier} variant="preview" billingPeriod={billingPeriod} />
+            </div>
+          </div>
         </div>
       </section>
 

@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto'
 import { createYooKassaClient, formatAmountRub } from './yookassaClient.js'
 import { sameEntityId } from './entityId.js'
+import { withDataFileLock } from './dataFileLock.js'
+import { resetSubscriptionEmailFlags } from './subscriptionNotify.js'
 
 export function getSubscriptionAmountRub(tariff, period) {
   const raw = period === 'year' ? tariff.priceYear : tariff.priceMonth
@@ -40,6 +42,7 @@ export function applySubscriptionSuccess(user, period, paymentMethodId, tariffId
   user.usage.wordDownloads = 0
   user.usage.boardDownloads = 0
   user.usage.tacticalVideoExports = 0
+  resetSubscriptionEmailFlags(user)
 }
 
 /** @deprecated используйте applySubscriptionSuccess */
@@ -47,19 +50,44 @@ export function applyProSubscriptionSuccess(user, period, paymentMethodId) {
   applySubscriptionSuccess(user, period, paymentMethodId, 'pro')
 }
 
+/**
+ * Убирает BOM, пробелы и необязательные кавычки вокруг значения из .env
+ * (иначе `live_…` в кавычках не распознаётся как боевой ключ).
+ */
+function normalizeEnvLine(value) {
+  if (value == null) return ''
+  let s = String(value).replace(/^\uFEFF/, '').trim()
+  if (
+    (s.startsWith('"') && s.endsWith('"') && s.length >= 2) ||
+    (s.startsWith("'") && s.endsWith("'") && s.length >= 2)
+  ) {
+    s = s.slice(1, -1).trim()
+  }
+  return s
+}
+
 export function getYooKassaConfig() {
-  const shopId = process.env.YOOKASSA_SHOP_ID?.trim()
-  const secretKey = process.env.YOOKASSA_SECRET_KEY?.trim()
-  const publicBase =
-    process.env.PUBLIC_APP_URL?.replace(/\/$/, '') ||
-    process.env.VITE_PUBLIC_APP_URL?.replace(/\/$/, '') ||
+  const shopId = normalizeEnvLine(process.env.YOOKASSA_SHOP_ID)
+  const secretKey = normalizeEnvLine(process.env.YOOKASSA_SECRET_KEY)
+  const publicBaseRaw =
+    normalizeEnvLine(process.env.PUBLIC_APP_URL) ||
+    normalizeEnvLine(process.env.VITE_PUBLIC_APP_URL) ||
     ''
+  const publicBase = publicBaseRaw.replace(/\/$/, '')
   return { shopId, secretKey, publicBase }
 }
 
 export function isYooKassaConfigured() {
   const { shopId, secretKey, publicBase } = getYooKassaConfig()
   return !!(shopId && secretKey && publicBase)
+}
+
+/** По префиксу секретного ключа API: боевой `live_`, тестовый `test_` (см. личный кабинет ЮKassa). */
+export function getYooKassaSecretKeyMode() {
+  const { secretKey } = getYooKassaConfig()
+  if (secretKey.startsWith('live_')) return 'live'
+  if (secretKey.startsWith('test_')) return 'test'
+  return secretKey ? 'unknown' : 'missing'
 }
 
 /**
@@ -247,7 +275,14 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
     if (!url) {
       throw new Error('ЮKassa не вернула ссылку на оплату')
     }
-    return { confirmationUrl: url, paymentId: payment.id }
+    /** Поле `test` в ответе API — источник истины: true только для тестового магазина. */
+    const yooKassaTest = payment.test === true
+    if (yooKassaTest) {
+      console.warn(
+        '[yookassa] Платёж создан в тестовом режиме (payment.test=true). Для боя: в .env shop_id и секрет из раздела «Боевой магазин», секрет с префиксом live_, затем перезапуск сервера.'
+      )
+    }
+    return { confirmationUrl: url, paymentId: payment.id, yooKassaTest }
   }
 
   async function createRenewalPayment(user) {
@@ -284,39 +319,45 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
     const payment = await client.createPayment(body, idem)
 
     if (payment.status === 'succeeded') {
-      const data = loadData()
-      if (!data.purchases) data.purchases = []
-      applySuccessfulYooKassaPayment({
-        payment,
-        data,
-        purchases: data.purchases
-      })
-      saveData(data)
-    } else if (payment.status !== 'pending' && payment.status !== 'waiting_for_capture') {
-      const data = loadData()
-      const u = data.users.find((x) => sameEntityId(x.id, user.id))
-      if (u && (u.tariff === 'pro' || u.tariff === 'pro_plus') && u.yookassaPaymentMethodId) {
-        u.subscriptionPaymentFailedAt = new Date().toISOString()
-        u.subscriptionGraceUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      await withDataFileLock(async () => {
+        const data = loadData()
+        if (!data.purchases) data.purchases = []
+        applySuccessfulYooKassaPayment({
+          payment,
+          data,
+          purchases: data.purchases
+        })
         saveData(data)
-      }
+      })
+    } else if (payment.status !== 'pending' && payment.status !== 'waiting_for_capture') {
+      await withDataFileLock(async () => {
+        const data = loadData()
+        const u = data.users.find((x) => sameEntityId(x.id, user.id))
+        if (u && (u.tariff === 'pro' || u.tariff === 'pro_plus') && u.yookassaPaymentMethodId) {
+          u.subscriptionPaymentFailedAt = new Date().toISOString()
+          u.subscriptionGraceUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+          saveData(data)
+        }
+      })
     }
 
     return payment
   }
 
-  function processPaymentSucceeded(payment) {
-    const data = loadData()
-    if (!data.purchases) data.purchases = []
-    const result = applySuccessfulYooKassaPayment({
-      payment,
-      data,
-      purchases: data.purchases
+  async function processPaymentSucceeded(payment) {
+    return withDataFileLock(async () => {
+      const data = loadData()
+      if (!data.purchases) data.purchases = []
+      const result = applySuccessfulYooKassaPayment({
+        payment,
+        data,
+        purchases: data.purchases
+      })
+      if (result.applied) {
+        saveData(data)
+      }
+      return result
     })
-    if (result.applied) {
-      saveData(data)
-    }
-    return result
   }
 
   async function runRenewalPass() {
@@ -342,13 +383,15 @@ export function createYooKassaService({ loadData, saveData, getTariffById }) {
       } catch (e) {
         console.error('[YooKassa] renewal error', user.id, e.message || e)
         try {
-          const fresh = loadData()
-          const u = fresh.users.find((x) => sameEntityId(x.id, user.id))
-          if (u && (u.tariff === 'pro' || u.tariff === 'pro_plus') && u.yookassaPaymentMethodId) {
-            u.subscriptionPaymentFailedAt = new Date().toISOString()
-            u.subscriptionGraceUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-            saveData(fresh)
-          }
+          await withDataFileLock(async () => {
+            const fresh = loadData()
+            const u = fresh.users.find((x) => sameEntityId(x.id, user.id))
+            if (u && (u.tariff === 'pro' || u.tariff === 'pro_plus') && u.yookassaPaymentMethodId) {
+              u.subscriptionPaymentFailedAt = new Date().toISOString()
+              u.subscriptionGraceUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+              saveData(fresh)
+            }
+          })
         } catch (_) {}
       } finally {
         renewalLocks.delete(user.id)

@@ -13,8 +13,23 @@ const defaultCanvasBackgrounds = {
   blueToBlue: ''
 }
 
+/** 3D-макет по зонам: строка JSON { preset, glbUrl } или пусто = пресет default */
+const defaultCanvas3dLayouts = {
+  full: '',
+  halfAttack: '',
+  halfDefense: '',
+  halfHorizontal: '',
+  quarter: '',
+  faceoff: '',
+  crease: '',
+  creaseTop: '',
+  creaseWithZones: '',
+  blueToBlue: ''
+}
+
 const defaultSettings = {
   canvasBackgrounds: defaultCanvasBackgrounds,
+  canvas3dLayouts: defaultCanvas3dLayouts,
   canvasSize: { width: 800, height: 400 }
 }
 
@@ -29,6 +44,10 @@ export function useCanvasSettings() {
           canvasBackgrounds: {
             ...defaultCanvasBackgrounds,
             ...(pages.canvasBackgrounds || {})
+          },
+          canvas3dLayouts: {
+            ...defaultCanvas3dLayouts,
+            ...(pages.canvas3dLayouts || {})
           },
           canvasSize: pages.canvasSize || { width: 800, height: 400 }
         })

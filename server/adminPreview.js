@@ -3,6 +3,7 @@
  * Заголовки от не-админов игнорируются вызывающим кодом через parse* (userId check).
  */
 import { normalizeStoredTariffId } from './tariffs.js'
+import { getEffectiveTariffId } from './effectiveTariff.js'
 import { getCurrentMonthKey, syncMonthlyPlanUsageOnObject } from './tariffLimits.js'
 import { isFieldZoneAllowedForTariff } from './fieldZones.js'
 
@@ -42,20 +43,15 @@ export function adminLibraryEffectiveTariff(req, userId) {
   return null
 }
 
-function getEffectiveTariffId(user) {
-  if (!user) return 'free'
-  if (user.tariffSuspended) return 'free'
-  return normalizeStoredTariffId(user.tariff)
-}
-
 /**
  * Тариф для лимитов и политик.
  * Не-админ: эффективный тариф пользователя.
  * Админ без превью-тарифа: admin (без лимитов).
  * Админ с X-Admin-Preview-Tariff: free | pro | pro_plus.
+ * @param {object|null} data — loadData() (нужен для корпоративной организации).
  */
-export function resolveLimitTariffId(req, userId, user) {
-  if (userId !== 'admin') return getEffectiveTariffId(user)
+export function resolveLimitTariffId(req, userId, user, data) {
+  if (userId !== 'admin') return getEffectiveTariffId(user, data)
   const t = parseAdminPreviewTariff(req, userId)
   if (t) return t
   return 'admin'

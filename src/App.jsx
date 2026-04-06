@@ -24,6 +24,7 @@ import TacticalBoard from './pages/TacticalBoard'
 import TacticalVideo from './pages/TacticalVideo'
 import PaymentCheckout from './pages/PaymentCheckout'
 import PaymentReturn from './pages/PaymentReturn'
+import SupportChat from './components/SupportChat/SupportChat'
 
 function PrivateRoute({ children, adminOnly, libraryStaffOnly, redirectAdminTo }) {
   const { user, loading } = useAuth()
@@ -60,6 +61,7 @@ export default function App() {
           <BrowserRouter>
             <FaviconUpdater />
             <DeviceAnalyticsReporter />
+            <SupportChat />
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />

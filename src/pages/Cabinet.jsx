@@ -1,19 +1,36 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useEditorPersona } from '../context/EditorPersonaContext'
 import { useAdminViewAs, ADMIN_VIEW_AS_OPTIONS } from '../context/AdminViewAsContext'
-import { Home, User, ClipboardList, CreditCard, Video, Lock, BookOpen } from 'lucide-react'
-import { TARIFFS, getTariffById, normalizeTariffId } from '../constants/tariffs'
-import { canPerform } from '../constants/tariffLimits'
+import { Home, User, ClipboardList, CreditCard, Video, Lock, BookOpen, Building2, Upload, Trash2, GraduationCap } from 'lucide-react'
+import { TARIFFS, getTariffById, normalizeTariffId, getDisplayTariffId } from '../constants/tariffs'
+import { canPerform, MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS } from '../constants/tariffLimits'
+import TariffLimitModal from '../components/TariffLimitModal/TariffLimitModal'
+import CorporateQuoteModal from '../components/CorporateQuoteModal/CorporateQuoteModal'
+import CorporatePriceBlock from '../components/CorporatePriceBlock/CorporatePriceBlock'
 import { openLibraryOrWarn } from '../utils/libraryDesktopOnly'
 import { useEffectiveUiTariff } from '../hooks/useEffectiveUiTariff'
 import { authFetch } from '../utils/authFetch'
 import { useAuthFetchOpts } from '../hooks/useAuthFetchOpts'
+import { useProfile } from '../hooks/useProfile'
+import HelpCenterReader from '../components/HelpCenter/HelpCenterReader'
 import './Cabinet.css'
+
+/** Те же правила, что на сервере в parseOrgMemberEmailsInput — для текста и загружаемого файла */
+function parseOrgEmailsFromText(text) {
+  const parts = String(text || '').split(/[\n,;]+/)
+  const out = []
+  for (const p of parts) {
+    const s = p.trim().toLowerCase()
+    if (s && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) out.push(s)
+  }
+  return [...new Set(out)]
+}
 
 export default function Cabinet() {
   const { user, logout, getToken, updateUser } = useAuth()
+  const { refreshProfile } = useProfile()
   const { setPersona } = useEditorPersona()
   const { viewAs, clearViewAs } = useAdminViewAs()
   const authFetchOpts = useAuthFetchOpts()
@@ -23,8 +40,21 @@ export default function Cabinet() {
 
   useEffect(() => {
     const s = searchParams.get('section')
-    if (s && ['profile', 'plans', 'tariffs', 'videos'].includes(s)) setSection(s)
+    if (s && ['profile', 'plans', 'tariffs', 'videos', 'organization', 'help'].includes(s)) setSection(s)
   }, [searchParams])
+
+  const [orgMine, setOrgMine] = useState(null)
+  const [orgForm, setOrgForm] = useState({
+    organizationName: '',
+    contactEmail: '',
+    phone: '',
+    contactNote: ''
+  })
+  const [emailsText, setEmailsText] = useState('')
+  const [inviteBusy, setInviteBusy] = useState(false)
+  const [inviteMsg, setInviteMsg] = useState('')
+  const [removingMemberId, setRemovingMemberId] = useState(null)
+  const [orgSaving, setOrgSaving] = useState(false)
   const [plansFilter, setPlansFilter] = useState('all') // 'all' | 'boards' | 'plans'
   const [plans, setPlans] = useState([])
   const [boards, setBoards] = useState([])
@@ -47,9 +77,12 @@ export default function Cabinet() {
     subscriptionGraceUntil: null,
     subscriptionPaymentFailedAt: null,
     subscriptionCardLast4: null,
-    usage: { plansCreated: 0, plansCreatedThisMonth: 0, pdfDownloads: 0, wordDownloads: 0, boardDownloads: 0 }
+    usage: { plansCreated: 0, plansCreatedThisMonth: 0, pdfDownloads: 0, wordDownloads: 0, boardDownloads: 0 },
+    mustChangePassword: false,
+    organization: null
   })
   const [planLimitToast, setPlanLimitToast] = useState('')
+  const [videoDownloadTariffModalOpen, setVideoDownloadTariffModalOpen] = useState(false)
   const [profileLoading, setProfileLoading] = useState(true)
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileError, setProfileError] = useState('')
@@ -58,21 +91,38 @@ export default function Cabinet() {
   const [passwordSaving, setPasswordSaving] = useState(false)
   const [passwordError, setPasswordError] = useState('')
   const [tariffPeriod, setTariffPeriod] = useState('month') // 'month' | 'year'
+  const [cabinetCorporateTier, setCabinetCorporateTier] = useState('corporate_pro')
+  const [corporateQuoteOpen, setCorporateQuoteOpen] = useState(false)
   const [tariffPurchasing, setTariffPurchasing] = useState(null) // tariffId being purchased
   const [subscriptionCancelLoading, setSubscriptionCancelLoading] = useState(false)
   const [subscriptionCancelError, setSubscriptionCancelError] = useState('')
   const subscriptionPanelRef = useRef(null)
+  const orgEmailsFileInputRef = useRef(null)
   /** Назначенный тариф (номинальный из профиля) — для бейджа и подсветки карточки «какой тариф выбран» */
-  const assignedTariffId =
-    user?.isAdmin && viewAs == null
-      ? 'admin'
-      : normalizeTariffId(profile.tariff ?? user?.tariff ?? profile.effectiveTariff ?? 'free')
+  const assignedTariffId = getDisplayTariffId({
+    isAdmin: user?.isAdmin,
+    viewAsIsNull: viewAs == null,
+    profile,
+    user
+  })
   const uiTariffForLimits = useEffectiveUiTariff(profile.effectiveTariff ?? profile.tariff ?? user?.tariff ?? 'free')
   /** Тариф для лимитов в UI; у админа в режиме «Просмотр как» — выбранный тариф */
   const limitsTariffId = normalizeTariffId(uiTariffForLimits)
+  /** Замок на «Скачать» у видео в кабинете — только бесплатный и Про (Про+ и админ скачивают без замка). */
+  const showCabinetVideoDownloadLock = useMemo(() => {
+    if (user?.isAdmin && viewAs == null) return false
+    return limitsTariffId === 'free' || limitsTariffId === 'pro'
+  }, [user?.isAdmin, viewAs, limitsTariffId])
   const assignedTariffInfo = getTariffById(assignedTariffId)
+  /** Пока действует корп. подписка по дате — личную подписку Про/Про+ оформить нельзя (сервер тоже режет). */
+  const corpSubscriptionBlocksPurchase =
+    !!(profile.organization && profile.organization.subscriptionActive !== false)
+  const hasActiveCorporateSubscription =
+    !!(profile.organization && profile.organization.subscriptionActive !== false)
   const showSubscriptionPanel =
-    (assignedTariffInfo.id === 'pro' || assignedTariffInfo.id === 'pro_plus') && !profile.tariffSuspended
+    (assignedTariffInfo.id === 'pro' || assignedTariffInfo.id === 'pro_plus') &&
+    !profile.tariffSuspended &&
+    !hasActiveCorporateSubscription
 
   const planCreateBlocked =
     !(user?.isAdmin && viewAs == null) &&
@@ -133,7 +183,9 @@ export default function Cabinet() {
           subscriptionGraceUntil: data.subscriptionGraceUntil || null,
           subscriptionPaymentFailedAt: data.subscriptionPaymentFailedAt || null,
           subscriptionCardLast4: data.subscriptionCardLast4 || null,
-          usage: data.usage || { plansCreated: 0, plansCreatedThisMonth: 0, pdfDownloads: 0, wordDownloads: 0, boardDownloads: 0 }
+          usage: data.usage || { plansCreated: 0, plansCreatedThisMonth: 0, pdfDownloads: 0, wordDownloads: 0, boardDownloads: 0 },
+          mustChangePassword: !!data.mustChangePassword,
+          organization: data.organization || null
         })
         updateUser({
           name: data.name,
@@ -142,7 +194,9 @@ export default function Cabinet() {
           photo: data.photo,
           teamLogo: data.teamLogo,
           tariff: storedT,
-          effectiveTariff: effectiveT
+          effectiveTariff: effectiveT,
+          mustChangePassword: !!data.mustChangePassword,
+          accountRole: data.accountRole || 'user'
         })
       })
       .catch(() => {})
@@ -158,6 +212,44 @@ export default function Cabinet() {
   }, [loadProfile])
 
   useEffect(() => {
+    if (profile.mustChangePassword && section !== 'profile') {
+      navigate('/cabinet?section=profile', { replace: true })
+      setSection('profile')
+    }
+  }, [profile.mustChangePassword, section, navigate])
+
+  useEffect(() => {
+    if (section === 'organization' && !profile.organization && !user?.isAdmin) {
+      navigate('/cabinet?section=plans', { replace: true })
+      setSection('plans')
+    }
+  }, [section, profile.organization, user?.isAdmin, navigate])
+
+  const loadOrgMine = useCallback((options = {}) => {
+    const { syncForm = false } = options
+    if (user?.isAdmin) return
+    authFetch('/api/org/mine', { ...authFetchOpts })
+      .then((r) => r.json())
+      .then((d) => {
+        setOrgMine(d)
+        if (syncForm && d.organization) {
+          setOrgForm({
+            organizationName: d.organization.organizationName || '',
+            contactEmail: d.organization.contactEmail || '',
+            phone: d.organization.phone || '',
+            contactNote: d.organization.contactNote || ''
+          })
+        }
+      })
+      .catch(() => setOrgMine(null))
+  }, [authFetchOpts, user?.isAdmin])
+
+  useEffect(() => {
+    if (user?.isAdmin || profile.mustChangePassword) return
+    if (section === 'organization' && profile.organization?.id) loadOrgMine({ syncForm: true })
+  }, [section, profile.organization?.id, profile.mustChangePassword, user?.isAdmin, loadOrgMine])
+
+  useEffect(() => {
     if (section === 'tariffs' && !user?.isAdmin) loadProfile()
   }, [section, user?.isAdmin, loadProfile])
 
@@ -166,6 +258,20 @@ export default function Cabinet() {
       setTariffPeriod(profile.subscriptionPeriod)
     }
   }, [profile.subscriptionPeriod])
+
+  useEffect(() => {
+    if (section !== 'tariffs' || user?.isAdmin) return
+    if (searchParams.get('corporateQuote') !== '1') return
+    const ct = searchParams.get('corporateTier')
+    if (ct === 'corporate_pro_plus' || ct === 'corporate_pro') {
+      setCabinetCorporateTier(ct)
+    }
+    setCorporateQuoteOpen(true)
+    navigate('/cabinet?section=tariffs', { replace: true })
+  }, [section, searchParams, user?.isAdmin, navigate])
+
+  const defaultCorporateQuoteEmail =
+    user?.login && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(user.login)) ? String(user.login) : ''
 
   function scrollToSubscriptionPanel() {
     subscriptionPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -210,6 +316,10 @@ export default function Cabinet() {
       const res = await authFetch(`/api/user/videos/${v.id}/file`, { ...authFetchOpts })
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
+        if (res.status === 403 && errData.code === 'VIDEO_DOWNLOAD_FORBIDDEN') {
+          setVideoDownloadTariffModalOpen(true)
+          return
+        }
         throw new Error(errData.error || 'Не удалось скачать')
       }
       const blob = await res.blob()
@@ -276,7 +386,18 @@ export default function Cabinet() {
       setPasswordForm({ oldPassword: '', newPassword: '', confirm: '' })
       setPasswordError('')
       setProfileSuccess('Пароль изменён')
+      setProfile((p) => ({ ...p, mustChangePassword: false }))
+      try {
+        const s = await fetch('/api/auth/session', { credentials: 'include' })
+        const sess = await s.json().catch(() => ({}))
+        if (s.ok && sess.user) updateUser(sess.user)
+        else updateUser({ mustChangePassword: false })
+      } catch {
+        updateUser({ mustChangePassword: false })
+      }
       setTimeout(() => setProfileSuccess(''), 3000)
+      loadProfile()
+      refreshProfile()
     } catch (err) {
       setPasswordError(err.message)
     } finally {
@@ -300,6 +421,146 @@ export default function Cabinet() {
     reader.readAsDataURL(file)
   }
 
+  function handleOrgEmailsFile(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const parsed = parseOrgEmailsFromText(String(reader.result || ''))
+      setEmailsText((prev) => {
+        const existing = parseOrgEmailsFromText(prev)
+        return [...new Set([...existing, ...parsed])].join('\n')
+      })
+    }
+    reader.readAsText(file, 'UTF-8')
+    e.target.value = ''
+  }
+
+  async function handleOrgSave(e) {
+    e.preventDefault()
+    setOrgSaving(true)
+    setInviteMsg('')
+    try {
+      const res = await authFetch('/api/org/settings', {
+        ...authFetchOpts,
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(orgForm)
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Ошибка сохранения')
+      setInviteMsg('Реквизиты организации сохранены')
+      if (data.organization) {
+        setOrgMine((prev) => ({
+          ...(prev || {}),
+          organization: { ...(prev?.organization || {}), ...data.organization }
+        }))
+        setOrgForm({
+          organizationName: data.organization.organizationName || '',
+          contactEmail: data.organization.contactEmail || '',
+          phone: data.organization.phone || '',
+          contactNote: data.organization.contactNote || ''
+        })
+      }
+    } catch (err) {
+      setInviteMsg(err.message || 'Ошибка')
+    } finally {
+      setOrgSaving(false)
+    }
+  }
+
+  async function handleAddOrgMembers(e) {
+    e.preventDefault()
+    setInviteBusy(true)
+    setInviteMsg('')
+    try {
+      const res = await authFetch('/api/org/members', {
+        ...authFetchOpts,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emailsText: emailsText.trim() })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Ошибка')
+      setEmailsText('')
+      const rows = (data.results || []).map((r) => {
+        if (!r.ok) return `${r.email}: ${r.error}`
+        if (r.mode === 'linked') return `${r.email}: подключён существующий аккаунт`
+        return `${r.email}: логин ${r.user.login} (временный пароль — в файле CSV или смените при первом входе)`
+      })
+      const msg = rows.length ? rows.join('\n') : 'Готово'
+      startTransition(() => setInviteMsg(msg))
+      if (data.organization && Array.isArray(data.members)) {
+        setOrgMine((prev) => ({
+          ...(prev || {}),
+          organization: data.organization ?? prev?.organization,
+          members: data.members,
+          credentialExportCount: data.credentialExportCount ?? prev?.credentialExportCount,
+          isOwner: data.isOwner ?? prev?.isOwner
+        }))
+      } else {
+        queueMicrotask(() => loadOrgMine({ syncForm: false }))
+      }
+    } catch (err) {
+      setInviteMsg(err.message || 'Ошибка')
+    } finally {
+      setInviteBusy(false)
+    }
+  }
+
+  async function handleExportCredentials() {
+    setInviteMsg('')
+    try {
+      const res = await authFetch('/api/org/credentials-export', { ...authFetchOpts })
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}))
+        throw new Error(errData.error || 'Ошибка выгрузки')
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'organization-logins.csv'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setInviteMsg(err.message || 'Ошибка')
+    }
+  }
+
+  async function handleRemoveOrgMember(memberId) {
+    if (
+      !window.confirm(
+        'Удалить пользователя из организации? У него отключится доступ по корпоративному тарифу; учётная запись останется на платформе.'
+      )
+    ) {
+      return
+    }
+    setRemovingMemberId(memberId)
+    setInviteMsg('')
+    try {
+      const res = await authFetch(`/api/org/members/${encodeURIComponent(memberId)}`, {
+        ...authFetchOpts,
+        method: 'DELETE'
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Ошибка')
+      setOrgMine((prev) => ({
+        ...(prev || {}),
+        organization: data.organization ?? prev?.organization,
+        members: data.members,
+        credentialExportCount: data.credentialExportCount ?? prev?.credentialExportCount,
+        isOwner: true
+      }))
+    } catch (err) {
+      setInviteMsg(err.message || 'Ошибка')
+    } finally {
+      setRemovingMemberId(null)
+    }
+  }
+
+  const lockNav = !user?.isAdmin && profile.mustChangePassword
+
   return (
     <div className="cabinet cabinet-ice">
       <aside className="cabinet-sidebar">
@@ -316,38 +577,60 @@ export default function Cabinet() {
             <span className="cabinet-nav-icon"><User size={20} /></span>
             Личные данные
           </button>
-          <button
-            type="button"
-            className={`cabinet-nav-item ${section === 'plans' ? 'active' : ''}`}
-            onClick={() => goSection('plans')}
-          >
-            <span className="cabinet-nav-icon"><ClipboardList size={20} /></span>
-            Мои план-конспекты
-          </button>
-          <button
-            type="button"
-            className={`cabinet-nav-item ${section === 'tariffs' ? 'active' : ''}`}
-            onClick={() => goSection('tariffs')}
-          >
-            <span className="cabinet-nav-icon"><CreditCard size={20} /></span>
-            Тарифы
-          </button>
-          <button
-            type="button"
-            className={`cabinet-nav-item ${section === 'videos' ? 'active' : ''}`}
-            onClick={() => goSection('videos')}
-          >
-            <span className="cabinet-nav-icon"><Video size={20} /></span>
-            Мои видео
-          </button>
-          <button
-            type="button"
-            className="cabinet-nav-item"
-            onClick={() => openLibraryOrWarn(navigate)}
-          >
-            <span className="cabinet-nav-icon"><BookOpen size={20} /></span>
-            Каталог упражнений
-          </button>
+          {!lockNav && profile.organization && (
+            <button
+              type="button"
+              className={`cabinet-nav-item ${section === 'organization' ? 'active' : ''}`}
+              onClick={() => goSection('organization')}
+            >
+              <span className="cabinet-nav-icon"><Building2 size={20} /></span>
+              Организация
+            </button>
+          )}
+          {!lockNav && (
+            <>
+              <button
+                type="button"
+                className={`cabinet-nav-item ${section === 'plans' ? 'active' : ''}`}
+                onClick={() => goSection('plans')}
+              >
+                <span className="cabinet-nav-icon"><ClipboardList size={20} /></span>
+                Мои план-конспекты
+              </button>
+              <button
+                type="button"
+                className={`cabinet-nav-item ${section === 'tariffs' ? 'active' : ''}`}
+                onClick={() => goSection('tariffs')}
+              >
+                <span className="cabinet-nav-icon"><CreditCard size={20} /></span>
+                Тарифы
+              </button>
+              <button
+                type="button"
+                className={`cabinet-nav-item ${section === 'videos' ? 'active' : ''}`}
+                onClick={() => goSection('videos')}
+              >
+                <span className="cabinet-nav-icon"><Video size={20} /></span>
+                Мои видео
+              </button>
+              <button
+                type="button"
+                className={`cabinet-nav-item ${section === 'help' ? 'active' : ''}`}
+                onClick={() => goSection('help')}
+              >
+                <span className="cabinet-nav-icon"><GraduationCap size={20} /></span>
+                Обучение
+              </button>
+              <button
+                type="button"
+                className="cabinet-nav-item"
+                onClick={() => openLibraryOrWarn(navigate)}
+              >
+                <span className="cabinet-nav-icon"><BookOpen size={20} /></span>
+                Каталог упражнений
+              </button>
+            </>
+          )}
           {user?.isEditor && !user?.isAdmin && (
             <button
               type="button"
@@ -409,6 +692,15 @@ export default function Cabinet() {
           {section === 'profile' && (
             <div className="cabinet-section cabinet-profile">
               <h2>Личные данные</h2>
+              {profile.mustChangePassword && (
+                <div className="cabinet-alert cabinet-alert-warn" role="status">
+                  <span className="cabinet-alert-icon"><Lock size={18} aria-hidden /></span>
+                  <span>
+                    Вход выполнен по временному паролю. Задайте новый пароль в блоке ниже — до смены пароля доступ к другим разделам кабинета
+                    закрыт.
+                  </span>
+                </div>
+              )}
               {user?.isAdmin ? (
                 <p className="cabinet-muted">Редактирование профиля недоступно для администратора.</p>
               ) : (
@@ -490,6 +782,36 @@ export default function Cabinet() {
                 </form>
               )}
 
+              {!user?.isAdmin && profile.organization && (
+                <div className="cabinet-org-profile-summary">
+                  <h3>Корпоративный доступ</h3>
+                  <p>
+                    Организация: <strong>{profile.organization.organizationName || '—'}</strong>
+                  </p>
+                  {profile.organization.tierExpiresAt && (
+                    <p className="cabinet-muted">
+                      Подписка организации действует до{' '}
+                      {new Date(profile.organization.tierExpiresAt).toLocaleDateString('ru')}
+                      {profile.organization.subscriptionActive === false ? ' (срок истёк — действует личный тариф)' : ''}
+                    </p>
+                  )}
+                  {profile.organization.ownerLogin && (
+                    <p className="cabinet-muted">
+                      Администратор тарифа (продление корпоративного доступа по счёту):{' '}
+                      <strong>{profile.organization.ownerLogin}</strong>
+                      {profile.organization.myRole === 'owner'
+                        ? ' — это вы.'
+                        : ' — продление оформляется только для этой учётной записи.'}
+                    </p>
+                  )}
+                  {profile.organization.myRole === 'member' && profile.organization.subscriptionActive !== false && (
+                    <p className="cabinet-muted">
+                      Пока действует корпоративная подписка, оформить личную подписку Про/Про+ нельзя.
+                    </p>
+                  )}
+                </div>
+              )}
+
               {!user?.isAdmin && (
                 <div className="cabinet-password-section">
                   <h3>Сменить пароль</h3>
@@ -535,15 +857,220 @@ export default function Cabinet() {
             </div>
           )}
 
+          {section === 'organization' && !user?.isAdmin && profile.organization && !profile.mustChangePassword && (
+            <div className="cabinet-section cabinet-org-page">
+              <h2>
+                <Building2 size={22} className="cabinet-inline-icon" aria-hidden /> Организация
+              </h2>
+              {profile.organization.myRole === 'owner' && (
+                <>
+                  <p className="cabinet-muted cabinet-org-page-lead">
+                    Корпоративный доступ. Письма на почту не отправляются — вы указываете email сотрудников, для новых аккаунтов
+                    пароли создаются автоматически; скачайте файл для Excel (колонки: email, логин, пароль). Первый вход только с
+                    временным паролем, затем система попросит задать новый.
+                  </p>
+                  <p className="cabinet-muted">
+                    Места: {orgMine?.organization?.seatsUsed ?? profile.organization?.seatsUsed ?? 0} из{' '}
+                    {orgMine?.organization?.seatLimit ?? profile.organization?.seatLimit ?? '—'} · Тариф:{' '}
+                    {profile.organization?.tier === 'corporate_pro_plus' ? 'Корпоративный Про+' : 'Корпоративный Про'}
+                    {profile.organization?.tierExpiresAt && (
+                      <>
+                        {' '}
+                        · подписка организации до{' '}
+                        {new Date(profile.organization.tierExpiresAt).toLocaleDateString('ru')}
+                      </>
+                    )}
+                  </p>
+                  {profile.organization?.ownerLogin && (
+                    <p className="cabinet-muted">
+                      Продление по счёту оформляется для владельца: <strong>{profile.organization.ownerLogin}</strong>
+                    </p>
+                  )}
+
+                  <h3 className="cabinet-org-page-subh">Реквизиты организации</h3>
+                  <form onSubmit={handleOrgSave} className="cabinet-form cabinet-form-compact">
+                    <div className="form-row">
+                      <label>Название организации</label>
+                      <input
+                        type="text"
+                        value={orgForm.organizationName}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, organizationName: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Почта (документооборот)</label>
+                      <input
+                        type="email"
+                        value={orgForm.contactEmail}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, contactEmail: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Телефон</label>
+                      <input
+                        type="text"
+                        value={orgForm.phone}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, phone: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Контакт для связи</label>
+                      <input
+                        type="text"
+                        value={orgForm.contactNote}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, contactNote: e.target.value }))}
+                        placeholder="Telegram, имя, удобное время"
+                      />
+                    </div>
+                    <button type="submit" className="btn-outline" disabled={orgSaving}>
+                      {orgSaving ? 'Сохранение...' : 'Сохранить реквизиты'}
+                    </button>
+                  </form>
+
+                  <h3 className="cabinet-org-page-subh">Участники</h3>
+                  {orgMine?.members && orgMine.members.length > 0 ? (
+                    <ul className="cabinet-org-members">
+                      {orgMine.members.map((m) => (
+                        <li key={m.id} className="cabinet-org-member-row">
+                          <span className="cabinet-org-member-text">
+                            {m.login} ({m.email}) — {m.orgRole === 'owner' ? 'владелец' : 'участник'}
+                          </span>
+                          {m.orgRole !== 'owner' && (
+                            <button
+                              type="button"
+                              className="btn-outline cabinet-org-member-remove"
+                              disabled={removingMemberId === m.id}
+                              title="Удалить из организации"
+                              aria-label={`Удалить ${m.login} из организации`}
+                              onClick={() => handleRemoveOrgMember(m.id)}
+                            >
+                              {removingMemberId === m.id ? (
+                                '…'
+                              ) : (
+                                <Trash2 size={16} strokeWidth={2} aria-hidden />
+                              )}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="cabinet-muted">Загрузка списка…</p>
+                  )}
+
+                  <h3 className="cabinet-org-page-subh">Добавить учётные записи по email</h3>
+                  <p className="cabinet-muted cabinet-org-hint">
+                    Укажите адреса: по одному в строке или через запятую; можно подгрузить файл .txt или .csv — адреса
+                    добавятся к списку в поле ниже. Для каждого нового адреса будет создан логин и временный пароль (без
+                    рассылки писем). Передайте доступ сотрудникам через скачанный для Excel файл.
+                  </p>
+                  <form onSubmit={handleAddOrgMembers} className="cabinet-form cabinet-form-compact cabinet-org-invite">
+                    <div className="form-row">
+                      <label htmlFor="org-emails-textarea">Email сотрудников</label>
+                      <textarea
+                        id="org-emails-textarea"
+                        className="cabinet-textarea"
+                        rows={5}
+                        value={emailsText}
+                        onChange={(e) => setEmailsText(e.target.value)}
+                        placeholder={'trainer1@club.ru\ntrainer2@club.ru'}
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div className="cabinet-org-file-row">
+                      <input
+                        ref={orgEmailsFileInputRef}
+                        type="file"
+                        accept=".txt,.csv,text/plain,text/csv"
+                        className="cabinet-sr-only"
+                        tabIndex={-1}
+                        aria-hidden
+                        onChange={handleOrgEmailsFile}
+                      />
+                      <button
+                        type="button"
+                        className="btn-outline cabinet-org-file-btn"
+                        aria-label="Подгрузить список email из файла"
+                        onClick={() => orgEmailsFileInputRef.current?.click()}
+                      >
+                        <Upload size={16} strokeWidth={2} aria-hidden />
+                        Подгрузить из файла
+                      </button>
+                      <span className="cabinet-muted cabinet-org-file-hint">.txt или .csv — адреса добавятся к полю выше</span>
+                    </div>
+                    <button type="submit" className="btn-primary" disabled={inviteBusy}>
+                      {inviteBusy ? 'Обработка…' : 'Создать учётные записи'}
+                    </button>
+                  </form>
+                  <div className="cabinet-org-export-block">
+                    <button type="button" className="btn-outline cabinet-org-export" onClick={handleExportCredentials}>
+                      Скачать для Excel — логины и пароли ({orgMine?.credentialExportCount ?? 0})
+                    </button>
+                    <p className="cabinet-muted cabinet-org-export-hint">
+                      Файл можно скачивать в любой момент; при добавлении новых учёток список в файле дополняется.
+                    </p>
+                  </div>
+                  {inviteMsg && (
+                    <p className="cabinet-success cabinet-org-msg cabinet-org-msg-pre">{inviteMsg}</p>
+                  )}
+                </>
+              )}
+
+              {profile.organization.myRole === 'member' && (
+                <div className="cabinet-org-member-readonly">
+                  <p>
+                    <strong>{profile.organization?.organizationName || 'Организация'}</strong>
+                  </p>
+                  <p className="cabinet-muted">
+                    Тариф:{' '}
+                    {profile.organization?.tier === 'corporate_pro_plus' ? 'Корпоративный Про+' : 'Корпоративный Про'}
+                    {profile.organization?.tierExpiresAt && (
+                      <>
+                        {' '}
+                        · до {new Date(profile.organization.tierExpiresAt).toLocaleDateString('ru')}
+                      </>
+                    )}
+                  </p>
+                  {profile.organization?.ownerLogin && (
+                    <p className="cabinet-muted">
+                      Администратор тарифа (продление): <strong>{profile.organization.ownerLogin}</strong>
+                    </p>
+                  )}
+                  <p className="cabinet-muted">Управление организацией доступно владельцу.</p>
+                  {profile.organization?.subscriptionActive !== false && (
+                    <p className="cabinet-muted">
+                      Пока действует корпоративная подписка, оформить личную подписку Про/Про+ нельзя.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {section === 'tariffs' && !user?.isAdmin && (
             <div className="cabinet-section cabinet-tariffs">
               <div className="cabinet-tariffs-hero">
                 <h2 className="cabinet-tariffs-title">Тарифные планы</h2>
                 <p className="cabinet-tariffs-subtitle">Выберите подходящий тариф для работы с платформой</p>
+                {corpSubscriptionBlocksPurchase && (
+                  <p className="cabinet-alert cabinet-alert-warn cabinet-tariffs-corp-note" role="status">
+                    Действует корпоративная подписка
+                    {profile.organization?.tierExpiresAt
+                      ? ` до ${new Date(profile.organization.tierExpiresAt).toLocaleDateString('ru')}`
+                      : ''}
+                    . Личную подписку Про/Про+ оформить нельзя; продление корпоративного доступа — по счёту для владельца
+                    {profile.organization?.ownerLogin ? ` (${profile.organization.ownerLogin})` : ''}.
+                  </p>
+                )}
                 <div className="cabinet-tariffs-current-badge">
                   <CreditCard size={20} strokeWidth={2} />
                   <span>Текущий тариф: <strong>{assignedTariffInfo.badge}</strong>{profile.tariffSuspended ? ' (приостановлен)' : ''}</span>
-                  {profile.tariffExpiresAt && (
+                  {profile.organization?.tierExpiresAt && profile.organization?.subscriptionActive !== false && (
+                    <span className="cabinet-tariffs-expiry" title="Корпоративная подписка">
+                      корп. до {new Date(profile.organization.tierExpiresAt).toLocaleDateString('ru')}
+                    </span>
+                  )}
+                  {profile.tariffExpiresAt && !hasActiveCorporateSubscription && (
                     <span className="cabinet-tariffs-expiry">до {new Date(profile.tariffExpiresAt).toLocaleDateString('ru')}</span>
                   )}
                   {profile.subscriptionAutoRenew && profile.subscriptionNextChargeAt && (
@@ -643,7 +1170,12 @@ export default function Cabinet() {
                         <button
                           type="button"
                           className="btn-primary btn-large"
-                          disabled={!!tariffPurchasing}
+                          disabled={!!tariffPurchasing || corpSubscriptionBlocksPurchase}
+                          title={
+                            corpSubscriptionBlocksPurchase
+                              ? 'Пока действует корпоративная подписка, личную оформить нельзя'
+                              : undefined
+                          }
                           onClick={() => navigate(`/payment?tariffId=${t.id}&period=${tariffPeriod}`)}
                         >
                           {tariffPurchasing === t.id ? 'Обработка...' : 'Купить'}
@@ -667,7 +1199,61 @@ export default function Cabinet() {
                   </div>
                 )
                 })}
+                <div className="tariff-card tariff-card-corporate">
+                  <div className={`tariff-badge tariff-badge-${getTariffById(cabinetCorporateTier).badgeClass || 'pro'}`}>
+                    {getTariffById(cabinetCorporateTier).badge}
+                  </div>
+                  <h3>Корпоративный</h3>
+                  <div className="cabinet-corporate-tier-toggle" role="group" aria-label="Уровень корпоративного тарифа">
+                    <button
+                      type="button"
+                      className={cabinetCorporateTier === 'corporate_pro' ? 'active' : ''}
+                      onClick={() => setCabinetCorporateTier('corporate_pro')}
+                    >
+                      Про
+                    </button>
+                    <button
+                      type="button"
+                      className={cabinetCorporateTier === 'corporate_pro_plus' ? 'active' : ''}
+                      onClick={() => setCabinetCorporateTier('corporate_pro_plus')}
+                    >
+                      Про+
+                    </button>
+                  </div>
+                  <p className="tariff-desc">{getTariffById(cabinetCorporateTier).description}</p>
+                  <p className="cabinet-corporate-billing-note">
+                    Для школ и клубов. Оплата по счёту на расчётный счёт — онлайн-оплата на сайте недоступна.
+                  </p>
+                  <ul className="tariff-features">
+                    {getTariffById(cabinetCorporateTier).features.map((f, i) => (
+                      <li key={`corp-${cabinetCorporateTier}-${i}`}>{f}</li>
+                    ))}
+                  </ul>
+                  <div className="tariff-price tariff-price--corporate">
+                    <CorporatePriceBlock tierId={cabinetCorporateTier} variant="cabinet" billingPeriod={tariffPeriod} />
+                  </div>
+                  {profile.organization &&
+                  (cabinetCorporateTier === 'corporate_pro' || cabinetCorporateTier === 'corporate_pro_plus') &&
+                  profile.organization.tier === cabinetCorporateTier ? (
+                    <span className="tariff-current-label">Действует сейчас</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-outline btn-large"
+                      onClick={() => setCorporateQuoteOpen(true)}
+                    >
+                      Запросить счёт
+                    </button>
+                  )}
+                </div>
               </div>
+              <CorporateQuoteModal
+                open={corporateQuoteOpen}
+                onClose={() => setCorporateQuoteOpen(false)}
+                tier={cabinetCorporateTier}
+                defaultEmail={defaultCorporateQuoteEmail}
+                defaultContactName={profile.name || ''}
+              />
             </div>
           )}
 
@@ -724,12 +1310,15 @@ export default function Cabinet() {
                         )}
                       </div>
                       <div className="cabinet-video-card-actions">
-                        {(user?.isAdmin || limitsTariffId === 'pro_plus') && (
+                        {user?.id && (
                           <button
                             type="button"
-                            className="btn-outline btn-small"
+                            className={`btn-outline btn-small cabinet-video-download-btn${showCabinetVideoDownloadLock ? ' cabinet-video-download-btn--locked' : ''}`}
                             onClick={() => handleDownloadSavedVideo(v)}
                           >
+                            {showCabinetVideoDownloadLock ? (
+                              <Lock size={14} strokeWidth={2.5} className="cabinet-video-download-lock-icon" aria-hidden />
+                            ) : null}
                             Скачать
                           </button>
                         )}
@@ -762,6 +1351,22 @@ export default function Cabinet() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {section === 'help' && (
+            <div className="cabinet-section cabinet-section-help">
+              <div className="cabinet-plans-header">
+                <h2>Обучение</h2>
+                <p className="cabinet-muted cabinet-help-lead">
+                  Инструкции по функциям сервиса, типичные вопросы и материалы для самостоятельного освоения.
+                </p>
+              </div>
+              <HelpCenterReader
+                getToken={getToken}
+                viewAs={authFetchOpts.viewAs}
+                isAdmin={!!user?.isAdmin}
+              />
             </div>
           )}
 
@@ -902,6 +1507,11 @@ export default function Cabinet() {
           )}
         </main>
       </div>
+      <TariffLimitModal
+        open={videoDownloadTariffModalOpen}
+        message={MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS}
+        onClose={() => setVideoDownloadTariffModalOpen(false)}
+      />
     </div>
   )
 }

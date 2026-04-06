@@ -1,5 +1,5 @@
 import { config as loadEnv } from 'dotenv';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __serverDir = dirname(fileURLToPath(import.meta.url));
@@ -12,9 +12,42 @@ import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { randomBytes } from 'crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { atomicWriteJsonSync } from './jsonAtomicWrite.js';
+import { withDataFileLock } from './dataFileLock.js';
+import {
+  assertYookassaWebhookIpAllowed,
+  getTrustedWebhookClientIp
+} from './yookassaWebhookNet.js';
 import multer from 'multer';
 import { TARIFFS, getTariffById, normalizeTariffIdForLimits, normalizeStoredTariffId } from './tariffs.js'
+import {
+  getEffectiveTariffId,
+  isOrgSubscriptionActive,
+  processExpiredPersonalTariffDowngrades
+} from './effectiveTariff.js'
 import { sameEntityId, findUserById } from './entityId.js'
+import {
+  ensureSupportThreads,
+  findThreadByUserId,
+  findThreadById,
+  appendUserMessage,
+  appendAdminMessage,
+  markThreadReadByUser,
+  markThreadReadByAdmin,
+  threadPayloadForUser,
+  totalUnreadByAdmin
+} from './supportThreads.js'
+import {
+  ensureHelpCenter,
+  validateAndNormalizeHelpCenter,
+  defaultHelpCenter,
+  MAX_HELP_IMAGE_BYTES,
+  MAX_HELP_VIDEO_BYTES,
+  helpImageFilename,
+  helpVideoFilename,
+  validateHelpImageMime,
+  validateHelpVideoMime
+} from './helpCenter.js'
 import { canPerform, getTariffLimits, syncMonthlyPlanUsage, getCurrentMonthKey, syncMonthlyPlanUsageOnObject } from './tariffLimits.js'
 import {
   parseAdminPreviewTariff,
@@ -46,6 +79,7 @@ import {
 } from './tacticalVideoPolicy.js'
 import {
   createYooKassaService,
+  getYooKassaSecretKeyMode,
   isYooKassaConfigured
 } from './yookassaSubscription.js'
 import {
@@ -62,6 +96,7 @@ import {
 } from './requestAuth.js'
 import {
   sendPasswordResetEmail,
+  sendCorporateQuoteEmail,
   isPasswordResetConfigured,
   getPublicBaseUrl,
   formatSmtpError,
@@ -69,6 +104,12 @@ import {
   isSmtpConfigured,
   isResendConfigured
 } from './mail.js'
+import {
+  bumpRequestLoad,
+  mergePendingRequestLoadsInto,
+  REQUEST_LOAD_LABELS_RU
+} from './requestLoadMetrics.js'
+import { runSubscriptionEmailNotifications, resetSubscriptionEmailFlags } from './subscriptionNotify.js'
 
 const __dirname = __serverDir;
 const app = express();
@@ -104,7 +145,12 @@ app.use(
         imgSrc: ["'self'", 'data:', 'https:', 'blob:'],
         connectSrc: ["'self'", 'https://fonts.googleapis.com', 'https://fonts.gstatic.com'],
         fontSrc: ["'self'", 'data:', 'https://fonts.gstatic.com'],
-        frameSrc: ["'none'"],
+        frameSrc: [
+          "'self'",
+          'https://www.youtube.com',
+          'https://www.youtube-nocookie.com',
+          'https://player.vimeo.com'
+        ],
         objectSrc: ["'none'"]
       }
     },
@@ -124,12 +170,25 @@ if (process.env.ENABLE_HSTS === '1') {
 
 app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
+app.use((req, res, next) => {
+  bumpRequestLoad(req.path);
+  next();
+});
 
 // Serve frontend (after npm run build)
 const distPath = join(__dirname, '..', 'dist');
 if (existsSync(distPath)) {
   app.use(express.static(distPath));
 }
+
+const UPLOADS_HELP = join(__dirname, 'uploads', 'help');
+const UPLOADS_HELP_IMAGES = join(UPLOADS_HELP, 'images');
+const UPLOADS_HELP_VIDEOS = join(UPLOADS_HELP, 'videos');
+try {
+  mkdirSync(UPLOADS_HELP_IMAGES, { recursive: true });
+  mkdirSync(UPLOADS_HELP_VIDEOS, { recursive: true });
+} catch (_) {}
+app.use('/uploads/help', express.static(UPLOADS_HELP));
 
 const DATA_FILE = process.env.HOCKEY_DATA_PATH
   ? process.env.HOCKEY_DATA_PATH
@@ -154,6 +213,32 @@ const forgotPasswordLimiter = rateLimit({
   legacyHeaders: false
 });
 
+const supportMessageLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: 'Слишком много сообщений. Подождите немного.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const helpImageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_HELP_IMAGE_BYTES },
+  fileFilter: (req, file, cb) => {
+    if (validateHelpImageMime(file.mimetype)) cb(null, true);
+    else cb(null, false);
+  }
+});
+
+const helpVideoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_HELP_VIDEO_BYTES },
+  fileFilter: (req, file, cb) => {
+    if (validateHelpVideoMime(file.mimetype)) cb(null, true);
+    else cb(null, false);
+  }
+});
+
 const PASSWORD_RESET_EXPIRY_MS = 60 * 60 * 1000;
 
 const UPLOADS_VIDEOS = join(__dirname, 'uploads', 'videos');
@@ -168,7 +253,7 @@ function purgeExpiredTacticalVideos(data) {
   let changed = false;
   for (const v of list) {
     const user = findUserById(data, v.userId);
-    const t = user ? getEffectiveTariffId(user) : 'free';
+    const t = user ? getEffectiveTariffId(user, data) : 'free';
     if (shouldAutoPurgeVideo(v, t)) {
       changed = true;
       if (v.filename && /^\d+\.(mp4|webm)$/.test(v.filename)) {
@@ -257,7 +342,20 @@ function loadData() {
     data.deviceStats = { mobile: 0, tablet: 0, desktop: 0, total: 0 };
   }
   if (!Array.isArray(data.deviceUserLog)) data.deviceUserLog = [];
+  if (!data.requestLoadBuckets || typeof data.requestLoadBuckets !== 'object') {
+    data.requestLoadBuckets = {};
+  }
+  if (!data.board3dAnalytics || typeof data.board3dAnalytics !== 'object') {
+    data.board3dAnalytics = {
+      totalOpens: 0,
+      uniqueUserIds: [],
+      eventsByDay: {},
+      bySource: {}
+    };
+  }
   if (pruneDeviceUserLogByAge(data)) saveData(data);
+  if (!Array.isArray(data.organizations)) data.organizations = [];
+  ensureSupportThreads(data);
   return data;
 }
 
@@ -270,10 +368,23 @@ function userMeetsLibraryMinTariff(userTariff, minTariffRaw) {
 }
 
 function saveData(data) {
-  writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  atomicWriteJsonSync(DATA_FILE, data);
 }
 
 const yooService = createYooKassaService({ loadData, saveData, getTariffById });
+
+if (isYooKassaConfigured()) {
+  const mode = getYooKassaSecretKeyMode()
+  const label =
+    mode === 'live'
+      ? 'боевой магазин (ключ live_)'
+      : mode === 'test'
+        ? 'ТЕСТОВЫЙ магазин (ключ test_)'
+        : 'нестандартный префикс ключа — проверьте YOOKASSA_SECRET_KEY'
+  console.log(`[hockey] ЮKassa: ${label}`)
+} else {
+  console.log('[hockey] ЮKassa: не настроена (нет SHOP_ID / SECRET_KEY / PUBLIC_APP_URL)')
+}
 
 function buildAdminDailySeries(days, users, plans, boards, videos) {
   const series = [];
@@ -288,6 +399,22 @@ function buildAdminDailySeries(days, users, plans, boards, videos) {
       plans: plans.filter((p) => p.createdAt && String(p.createdAt).slice(0, 10) === key).length,
       boards: boards.filter((b) => b.createdAt && String(b.createdAt).slice(0, 10) === key).length,
       videos: videos.filter((v) => v.createdAt && String(v.createdAt).slice(0, 10) === key).length
+    });
+  }
+  return series;
+}
+
+function buildBoard3dOpensSeries(days, eventsByDay) {
+  const ed = eventsByDay && typeof eventsByDay === 'object' ? eventsByDay : {};
+  const series = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    d.setHours(0, 0, 0, 0);
+    const key = d.toISOString().slice(0, 10);
+    series.push({
+      date: key,
+      opens: ed[key] || 0
     });
   }
   return series;
@@ -319,8 +446,9 @@ function topUsersFromCounts(counts, users, limit) {
 }
 
 function loadAdmin() {
+  let admin;
   if (!existsSync(ADMIN_FILE)) {
-    return {
+    admin = {
       profile: { login: 'myadmin', email: 'admin@hockey.local', name: '' },
       password: null,
       pages: {
@@ -344,14 +472,18 @@ function loadAdmin() {
         footerLegalInn: 'ИНН: 760402772519',
         footerLegalOgrnip: 'ОГРНИП: 325762700040692',
         footerText: '© Hockey Tactics — платформа для тренеров и хоккеистов'
-      }
+      },
+      helpCenter: defaultHelpCenter()
     };
+  } else {
+    admin = JSON.parse(readFileSync(ADMIN_FILE, 'utf-8'));
   }
-  return JSON.parse(readFileSync(ADMIN_FILE, 'utf-8'));
+  ensureHelpCenter(admin);
+  return admin;
 }
 
 function saveAdmin(data) {
-  writeFileSync(ADMIN_FILE, JSON.stringify(data, null, 2));
+  atomicWriteJsonSync(ADMIN_FILE, data);
 }
 
 // Simple custom reCAPTCHA - user must solve math or select correct answer
@@ -395,6 +527,7 @@ app.post('/api/auth/register', loginRegisterLimiter, (req, res) => {
     password: hashPassword(password),
     isAdmin: false,
     tariff: 'free',
+    accountRole: 'user',
     createdAt: new Date().toISOString(),
     privacyAcceptedAt: new Date().toISOString()
   };
@@ -406,7 +539,16 @@ app.post('/api/auth/register', loginRegisterLimiter, (req, res) => {
   res.json({
     success: true,
     login,
-    user: { id: newUser.id, login, email, isAdmin: false, isEditor: false, tariff: 'free' }
+    user: {
+      id: newUser.id,
+      login,
+      email,
+      isAdmin: false,
+      isEditor: false,
+      tariff: 'free',
+      accountRole: 'user',
+      mustChangePassword: false
+    }
   });
 });
 
@@ -462,6 +604,10 @@ app.post('/api/auth/login', loginRegisterLimiter, (req, res) => {
 
   const tok = createSessionToken(user.id, false, !!user.isEditor);
   setSessionCookie(res, tok);
+  const eff = getEffectiveTariffId(user, data);
+  const orgPayload = user.organizationId
+    ? organizationPayloadForClient(data, findOrganizationById(data, user.organizationId), user)
+    : null;
   res.json({
     success: true,
     user: {
@@ -470,7 +616,11 @@ app.post('/api/auth/login', loginRegisterLimiter, (req, res) => {
       email: user.email,
       isAdmin: false,
       isEditor: !!user.isEditor,
-      tariff: normalizeStoredTariffId(user.tariff)
+      tariff: normalizeStoredTariffId(user.tariff),
+      effectiveTariff: eff,
+      organization: orgPayload,
+      accountRole: user.accountRole || 'user',
+      mustChangePassword: !!user.mustChangePassword
     }
   });
 });
@@ -484,7 +634,8 @@ app.get('/api/auth/session', (req, res) => {
   const userId = getUserIdFromRequest(req);
   if (!userId) return res.status(401).json({ error: 'Не авторизован' });
   const data = loadData();
-  if (processSubscriptionGraceDowngrades(data)) saveData(data);
+  if (runSubscriptionMaintenance(data)) saveData(data);
+  queueSubscriptionEmailJobs();
   if (userId === 'admin') {
     const adminData = loadAdmin();
     return res.json({
@@ -502,6 +653,10 @@ app.get('/api/auth/session', (req, res) => {
   if (user.blocked) {
     return res.status(403).json({ error: 'Аккаунт заблокирован', code: 'ACCOUNT_BLOCKED' });
   }
+  const eff = getEffectiveTariffId(user, data);
+  const orgPayload = user.organizationId
+    ? organizationPayloadForClient(data, findOrganizationById(data, user.organizationId), user)
+    : null;
   res.json({
     user: {
       id: user.id,
@@ -509,7 +664,11 @@ app.get('/api/auth/session', (req, res) => {
       email: user.email,
       isAdmin: false,
       isEditor: !!user.isEditor,
-      tariff: normalizeStoredTariffId(user.tariff)
+      tariff: normalizeStoredTariffId(user.tariff),
+      effectiveTariff: eff,
+      organization: orgPayload,
+      accountRole: user.accountRole || 'user',
+      mustChangePassword: !!user.mustChangePassword
     }
   });
 });
@@ -622,6 +781,7 @@ app.post('/api/auth/reset-password', loginRegisterLimiter, (req, res) => {
   user.password = hashPassword(password);
   user.passwordResetToken = null;
   user.passwordResetExpiresAt = null;
+  if (user.mustChangePassword) user.mustChangePassword = false;
   saveData(data);
   res.json({ ok: true, login: user.login });
 });
@@ -660,13 +820,6 @@ function canManageLibrary(req) {
   return !!(user && !user.blocked && user.isEditor === true);
 }
 
-/** Номинальный тариф для лимитов: при приостановке — бесплатный; иначе канонический id из поля tariff. */
-function getEffectiveTariffId(user) {
-  if (!user) return 'free';
-  if (user.tariffSuspended) return 'free';
-  return normalizeStoredTariffId(user.tariff);
-}
-
 /** После неудачного автосписания даётся 24 ч на оплату; по истечении — переход на бесплатный. */
 function processSubscriptionGraceDowngrades(data) {
   const now = Date.now();
@@ -674,6 +827,9 @@ function processSubscriptionGraceDowngrades(data) {
   for (const user of data.users || []) {
     if (!user.subscriptionGraceUntil) continue;
     if (new Date(user.subscriptionGraceUntil).getTime() > now) continue;
+    const graceEmail = (user.email || '').trim();
+    const graceNotifyLapsed =
+      graceEmail && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(graceEmail);
     user.tariff = 'free';
     user.subscriptionGraceUntil = null;
     user.subscriptionPaymentFailedAt = null;
@@ -684,9 +840,27 @@ function processSubscriptionGraceDowngrades(data) {
     user.subscriptionCancelledAt = user.subscriptionCancelledAt || new Date().toISOString();
     user.tariffExpiresAt = null;
     user.tariffSuspended = false;
+    if (graceNotifyLapsed) user.subscriptionLapsedEmailPending = true;
     changed = true;
   }
   return changed;
+}
+
+/** Grace после ошибки автосписания + сброс истёкших личных тарифов по tariffExpiresAt. */
+function runSubscriptionMaintenance(data) {
+  let changed = processSubscriptionGraceDowngrades(data);
+  if (processExpiredPersonalTariffDowngrades(data)) changed = true;
+  return changed;
+}
+
+/** Асинхронная очередь писем о подписке (не блокирует ответ Express). */
+function queueSubscriptionEmailJobs() {
+  setImmediate(() => {
+    withDataFileLock(async () => {
+      const d = loadData();
+      await runSubscriptionEmailNotifications(d, saveData);
+    }).catch((e) => console.error('[subscription emails]', e));
+  });
 }
 
 /** Метка типа устройства (один раз за сессию вкладки). С авторизацией — пишем пользователя и IP в deviceUserLog. */
@@ -727,6 +901,34 @@ app.post('/api/analytics/device', (req, res) => {
   res.json({ ok: true });
 });
 
+/** Одно событие «открыта 3D-доска» за сессию вкладки (клиент дедуплицирует). */
+app.post('/api/analytics/board-3d', (req, res) => {
+  const rawSource = String((req.body && req.body.source) || '').trim().slice(0, 64) || 'unknown';
+  const data = loadData();
+  if (!data.board3dAnalytics || typeof data.board3dAnalytics !== 'object') {
+    data.board3dAnalytics = { totalOpens: 0, uniqueUserIds: [], eventsByDay: {}, bySource: {} };
+  }
+  const b = data.board3dAnalytics;
+  b.totalOpens = (b.totalOpens || 0) + 1;
+  const day = new Date().toISOString().slice(0, 10);
+  b.eventsByDay = b.eventsByDay && typeof b.eventsByDay === 'object' ? b.eventsByDay : {};
+  b.eventsByDay[day] = (b.eventsByDay[day] || 0) + 1;
+  b.bySource = b.bySource && typeof b.bySource === 'object' ? b.bySource : {};
+  b.bySource[rawSource] = (b.bySource[rawSource] || 0) + 1;
+
+  const uid = getUserIdFromRequest(req);
+  if (uid && uid !== 'admin') {
+    b.uniqueUserIds = Array.isArray(b.uniqueUserIds) ? b.uniqueUserIds : [];
+    if (!b.uniqueUserIds.includes(uid)) {
+      b.uniqueUserIds.push(uid);
+      if (b.uniqueUserIds.length > 5000) b.uniqueUserIds = b.uniqueUserIds.slice(-5000);
+    }
+  }
+
+  saveData(data);
+  res.json({ ok: true });
+});
+
 function blockedUserGuard(req, res, next) {
   if (!req.path.startsWith('/api/')) return next();
   if (req.path.startsWith('/api/auth/')) return next();
@@ -743,12 +945,64 @@ function blockedUserGuard(req, res, next) {
 
 app.use(blockedUserGuard);
 
+/** Пока не сменён временный пароль приглашения — только сессия, профиль (чтение), смена пароля, выход. */
+app.use((req, res, next) => {
+  const uid = getUserIdFromRequest(req);
+  if (!uid || uid === 'admin') return next();
+  const data = loadData();
+  const user = findUserById(data, uid);
+  if (!user || !user.mustChangePassword) return next();
+  const p = req.path || '';
+  const ok =
+    p === '/api/auth/logout' ||
+    (p === '/api/auth/session' && req.method === 'GET') ||
+    (p === '/api/user/password' && req.method === 'PUT') ||
+    (p === '/api/user/profile' && req.method === 'GET');
+  if (ok) return next();
+  return res.status(403).json({ error: 'Необходимо сменить пароль', code: 'MUST_CHANGE_PASSWORD' });
+});
+
+function randomInvitePassword(len = 14) {
+  const cs = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const buf = randomBytes(len);
+  let s = '';
+  for (let i = 0; i < len; i++) s += cs[buf[i] % cs.length];
+  return s;
+}
+
+function findOrganizationById(data, orgId) {
+  return (data.organizations || []).find((o) => sameEntityId(o.id, orgId));
+}
+
+function organizationPayloadForClient(data, org, user) {
+  if (!org) return null;
+  const owner = org.ownerUserId ? findUserById(data, org.ownerUserId) : null;
+  const tierExpiresAt = org.tierExpiresAt || null;
+  return {
+    id: org.id,
+    tier: org.tier,
+    organizationName: org.organizationName || '',
+    contactEmail: org.contactEmail || '',
+    phone: org.phone || '',
+    contactNote: org.contactNote || '',
+    seatLimit: org.seatLimit ?? 0,
+    seatsUsed: (org.memberIds || []).length,
+    ownerUserId: org.ownerUserId || null,
+    ownerLogin: owner?.login || null,
+    ownerEmail: owner?.email || null,
+    tierExpiresAt,
+    subscriptionActive: isOrgSubscriptionActive(org),
+    myRole: user.orgRole || null
+  };
+}
+
 app.get('/api/user/profile', (req, res) => {
   if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' });
 
   const userId = getUserIdFromRequest(req);
   const data = loadData();
-  if (processSubscriptionGraceDowngrades(data)) saveData(data);
+  if (runSubscriptionMaintenance(data)) saveData(data);
+  queueSubscriptionEmailJobs();
 
   if (userId === 'admin') {
     const previewT = parseAdminPreviewTariff(req, userId);
@@ -801,7 +1055,7 @@ app.get('/api/user/profile', (req, res) => {
   const monthKey = getCurrentMonthKey()
   const plansThisMonth = usage.plansMonthKey === monthKey ? (usage.plansCreatedThisMonth || 0) : 0
   const storedTariff = normalizeStoredTariffId(user.tariff)
-  const effectiveTariff = getEffectiveTariffId(user)
+  const effectiveTariff = getEffectiveTariffId(user, data)
   res.json({
     id: user.id,
     login: user.login,
@@ -823,6 +1077,11 @@ app.get('/api/user/profile', (req, res) => {
     subscriptionGraceUntil: user.subscriptionGraceUntil || null,
     subscriptionPaymentFailedAt: user.subscriptionPaymentFailedAt || null,
     subscriptionCardLast4: user.yookassaCardLast4 || null,
+    mustChangePassword: !!user.mustChangePassword,
+    accountRole: user.accountRole || 'user',
+    organization: user.organizationId
+      ? organizationPayloadForClient(data, findOrganizationById(data, user.organizationId), user)
+      : null,
     usage: {
       plansCreated: usage.plansCreated || 0,
       pdfDownloads: usage.pdfDownloads || 0,
@@ -879,7 +1138,7 @@ app.post('/api/user/usage/check', (req, res) => {
 
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
-  const tariff = getEffectiveTariffId(user);
+  const tariff = getEffectiveTariffId(user, data);
   const usage = user.usage || {};
 
   if (!canPerform(tariff, mapAction[action], usage)) {
@@ -916,7 +1175,7 @@ app.get('/api/user/tactical-video/limits', (req, res) => {
   const data = loadData();
   const user = findUserById(data, userId);
   if (userId === 'admin') {
-    const limitTariff = resolveLimitTariffId(req, userId, null);
+    const limitTariff = resolveLimitTariffId(req, userId, null, data);
     if (limitTariff === 'admin') {
       return res.json({
         autoSaveOnDownload: true,
@@ -958,7 +1217,7 @@ app.get('/api/user/tactical-video/limits', (req, res) => {
     });
   }
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-  const tariff = getEffectiveTariffId(user);
+  const tariff = getEffectiveTariffId(user, data);
   const t = normalizeTariffIdForLimits(tariff);
   const videos = listUserVideos(data, userId);
   const base = {
@@ -1034,9 +1293,193 @@ app.put('/api/user/password', (req, res) => {
   }
 
   user.password = hashPassword(newPassword);
+  if (user.mustChangePassword) user.mustChangePassword = false;
   saveData(data);
   res.json({ success: true });
 });
+
+// Заявка на корпоративный тариф (письмо на info@my-hockey.ru)
+app.post('/api/corporate/quote-request', loginRegisterLimiter, async (req, res) => {
+  try {
+    const b = req.body || {}
+    const organizationName = String(b.organizationName || '').trim().slice(0, 500)
+    const contactName = String(b.contactName || '').trim().slice(0, 200)
+    const email = String(b.email || '').trim().slice(0, 320)
+    const phone = String(b.phone || '').trim().slice(0, 80)
+    const inn = b.inn != null ? String(b.inn).trim().slice(0, 20) : ''
+    const seats = b.seats != null && b.seats !== '' ? String(b.seats).trim().slice(0, 20) : ''
+    const comment = String(b.comment || '').trim().slice(0, 4000)
+    const tierRaw = String(b.tier || 'corporate_pro')
+    const tier = tierRaw === 'corporate_pro_plus' ? 'corporate_pro_plus' : 'corporate_pro'
+
+    if (!organizationName || !contactName || !email || !phone) {
+      return res.status(400).json({
+        error: 'Заполните организацию, контактное лицо, email и телефон'
+      })
+    }
+    if (!inn) {
+      return res.status(400).json({ error: 'Укажите ИНН' })
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Проверьте email' })
+    }
+
+    let requesterLogin = null
+    let requesterId = null
+    const uid = getUserIdFromRequest(req)
+    if (uid && uid !== 'admin') {
+      const data = loadData()
+      const u = findUserById(data, uid)
+      if (u) {
+        requesterLogin = u.login
+        requesterId = u.id
+      }
+    }
+
+    await sendCorporateQuoteEmail({
+      organizationName,
+      contactName,
+      email,
+      phone,
+      inn,
+      seats: seats || undefined,
+      comment: comment || undefined,
+      tier,
+      requesterLogin,
+      requesterId
+    })
+    res.json({ success: true })
+  } catch (e) {
+    console.error('[corporate quote]', e)
+    res.status(503).json({ error: e.message || 'Не удалось отправить заявку' })
+  }
+})
+
+// Чат поддержки (пользователь; один тред на userId)
+app.get('/api/support/thread', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' })
+  const userId = getUserIdFromRequest(req)
+  if (!userId || userId === 'admin') return res.status(403).json({ error: 'Доступ запрещён' })
+  const data = loadData()
+  const t = findThreadByUserId(data, userId)
+  res.json({ thread: threadPayloadForUser(t) })
+})
+
+app.post('/api/support/thread/read', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' })
+  const userId = getUserIdFromRequest(req)
+  if (!userId || userId === 'admin') return res.status(403).json({ error: 'Доступ запрещён' })
+  const data = loadData()
+  const had = markThreadReadByUser(data, userId)
+  if (had) saveData(data)
+  const t = findThreadByUserId(data, userId)
+  res.json({ thread: threadPayloadForUser(t) })
+})
+
+app.post('/api/support/messages', supportMessageLimiter, async (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' })
+  const userId = getUserIdFromRequest(req)
+  if (!userId || userId === 'admin') return res.status(403).json({ error: 'Доступ запрещён' })
+  try {
+    const out = await withDataFileLock(async () => {
+      const data = loadData()
+      const r = appendUserMessage(data, userId, req.body?.text)
+      if (r.error) return { err: r.error }
+      saveData(data)
+      return { thread: threadPayloadForUser(r.thread) }
+    })
+    if (out.err === 'empty') return res.status(400).json({ error: 'Введите текст сообщения' })
+    res.json(out)
+  } catch (e) {
+    console.error('[support]', e)
+    res.status(500).json({ error: e.message || 'Ошибка' })
+  }
+})
+
+app.get('/api/admin/support/threads', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' })
+  }
+  const data = loadData()
+  ensureSupportThreads(data)
+  const list = [...data.supportThreads].sort((a, b) =>
+    String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+  )
+  const threads = list.map((t) => {
+    const u = findUserById(data, t.userId)
+    return {
+      id: t.id,
+      userId: t.userId,
+      login: u?.login || '',
+      email: u?.email || '',
+      updatedAt: t.updatedAt,
+      unreadByAdmin: Number(t.unreadByAdmin) || 0,
+      messageCount: (t.messages || []).length
+    }
+  })
+  res.json({ threads, totalUnreadByAdmin: totalUnreadByAdmin(data) })
+})
+
+app.get('/api/admin/support/threads/:id', async (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' })
+  }
+  const { id } = req.params
+  try {
+    const payload = await withDataFileLock(async () => {
+      const data = loadData()
+      const t = findThreadById(data, id)
+      if (!t) return { notFound: true }
+      markThreadReadByAdmin(data, id)
+      saveData(data)
+      const u = findUserById(data, t.userId)
+      return {
+        thread: {
+          id: t.id,
+          userId: t.userId,
+          login: u?.login || '',
+          email: u?.email || '',
+          messages: Array.isArray(t.messages) ? t.messages : [],
+          updatedAt: t.updatedAt
+        }
+      }
+    })
+    if (payload.notFound) return res.status(404).json({ error: 'Диалог не найден' })
+    res.json(payload)
+  } catch (e) {
+    console.error('[admin support]', e)
+    res.status(500).json({ error: e.message || 'Ошибка' })
+  }
+})
+
+app.post('/api/admin/support/threads/:id/messages', supportMessageLimiter, async (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' })
+  }
+  const { id } = req.params
+  try {
+    const out = await withDataFileLock(async () => {
+      const data = loadData()
+      const r = appendAdminMessage(data, id, req.body?.text)
+      if (r.error === 'empty') return { err: 'empty' }
+      if (r.error === 'not_found') return { err: 'not_found' }
+      saveData(data)
+      return {
+        thread: {
+          id: r.thread.id,
+          messages: r.thread.messages,
+          updatedAt: r.thread.updatedAt
+        }
+      }
+    })
+    if (out.err === 'empty') return res.status(400).json({ error: 'Введите текст сообщения' })
+    if (out.err === 'not_found') return res.status(404).json({ error: 'Диалог не найден' })
+    res.json(out)
+  } catch (e) {
+    console.error('[admin support reply]', e)
+    res.status(500).json({ error: e.message || 'Ошибка' })
+  }
+})
 
 // Список тарифов (для покупки — без Ultima); без авторизации — без скрытых тарифов
 app.get('/api/tariffs', (req, res) => {
@@ -1052,6 +1495,18 @@ app.post('/api/payments/yookassa/create', async (req, res) => {
   if (userId === 'admin') return res.status(403).json({ error: 'Админ не покупает тарифы' });
   if (!isYooKassaConfigured()) {
     return res.status(503).json({ error: 'Оплата не настроена. Укажите YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY и PUBLIC_APP_URL на сервере.' });
+  }
+  const payData = loadData();
+  const payUser = findUserById(payData, userId);
+  if (!payUser) return res.status(401).json({ error: 'Не авторизован' });
+  if (payUser.organizationId) {
+    const payOrg = findOrganizationById(payData, payUser.organizationId);
+    if (payOrg && isOrgSubscriptionActive(payOrg)) {
+      return res.status(403).json({
+        error:
+          'Пока действует корпоративная подписка организации, личную подписку Про/Про+ оформить нельзя. Продление корпоративного доступа — по счёту для владельца организации (см. раздел «Организация» в кабинете).'
+      });
+    }
   }
   const { period, tariffId: tariffIdRaw } = req.body || {};
   if (period !== 'month' && period !== 'year') {
@@ -1076,19 +1531,28 @@ app.post('/api/payments/yookassa/create', async (req, res) => {
   }
 });
 
-// Уведомления ЮKassa (без авторизации; проверка — повторный GET платежа по API)
+// Уведомления ЮKassa (без авторизации; проверка — повторный GET платежа по API + опционально IP allowlist)
 app.post('/api/payments/yookassa/webhook', async (req, res) => {
   try {
+    assertYookassaWebhookIpAllowed(req);
     const body = req.body || {};
     const event = body.event;
     const obj = body.object;
     if (event !== 'payment.succeeded' || !obj?.id) {
       return res.status(200).json({ ok: true });
     }
-    const payment = await yooService.verifyPaymentFromApi(obj.id);
-    yooService.processPaymentSucceeded(payment);
+    const id = String(obj.id).trim();
+    if (!/^[\w-]+$/.test(id) || id.length > 128) {
+      return res.status(200).json({ ok: true });
+    }
+    const payment = await yooService.verifyPaymentFromApi(id);
+    await yooService.processPaymentSucceeded(payment);
     return res.status(200).json({ ok: true });
   } catch (err) {
+    if (err && err.code === 'YOOKASSA_WEBHOOK_IP_FORBIDDEN') {
+      console.warn('[yookassa] webhook rejected IP:', getTrustedWebhookClientIp(req));
+      return res.status(403).json({ ok: false });
+    }
     console.error('YooKassa webhook:', err);
     return res.status(200).json({ ok: false });
   }
@@ -1140,7 +1604,7 @@ app.get('/api/payments/yookassa/status', async (req, res) => {
     if (!sameEntityId(payment.metadata?.userId, userId)) {
       return res.status(403).json({ error: 'Нет доступа к этому платежу' });
     }
-    yooService.processPaymentSucceeded(payment);
+    await yooService.processPaymentSucceeded(payment);
     const data = loadData();
     const user = findUserById(data, userId);
     return res.json({
@@ -1181,6 +1645,7 @@ app.post('/api/user/purchase', (req, res) => {
 
   user.tariff = tariff.id
   user.tariffExpiresAt = expiresAt.toISOString()
+  resetSubscriptionEmailFlags(user)
   if (tariff.id === 'pro' || tariff.id === 'pro_plus') {
     user.usage = user.usage || {}
     user.usage.plansCreated = 0
@@ -1226,7 +1691,7 @@ app.post('/api/plans', (req, res) => {
   const previewTariff = parseAdminPreviewTariff(req, userId);
   const applyLimits = (user && userId !== 'admin') || (userId === 'admin' && previewTariff);
   if (applyLimits) {
-    const limitTariff = resolveLimitTariffId(req, userId, user);
+    const limitTariff = resolveLimitTariffId(req, userId, user, data);
     const limits = getTariffLimits(limitTariff);
     let usageForLimits;
     if (userId === 'admin' && previewTariff) {
@@ -1291,7 +1756,7 @@ app.put('/api/plans/:id', (req, res) => {
     const previewTariff = parseAdminPreviewTariff(req, userId);
     const applyLimits = (user && userId !== 'admin') || (userId === 'admin' && previewTariff);
     if (applyLimits) {
-      const limitTariff = resolveLimitTariffId(req, userId, user);
+      const limitTariff = resolveLimitTariffId(req, userId, user, data);
       const zoneErr = validatePlanExercisesFieldZonesForTariff(limitTariff, req.body.exercises);
       if (zoneErr) return res.status(403).json(zoneErr);
       const limits = getTariffLimits(limitTariff);
@@ -1366,7 +1831,7 @@ app.post('/api/boards', (req, res) => {
   const previewTariff = parseAdminPreviewTariff(req, userId);
   const applyFieldZone = (user && userId !== 'admin') || (userId === 'admin' && previewTariff);
   if (applyFieldZone) {
-    const limitTariff = resolveLimitTariffId(req, userId, user);
+    const limitTariff = resolveLimitTariffId(req, userId, user, data);
     if (!isFieldZoneAllowedForTariff(limitTariff, fieldZone)) {
       return res.status(403).json({
         error: 'Доступно на тарифе Про и Про+',
@@ -1416,7 +1881,7 @@ app.put('/api/boards/:id', (req, res) => {
     req.body.fieldZone !== undefined &&
     ((user && userId !== 'admin') || (userId === 'admin' && previewTariff));
   if (applyFieldZone) {
-    const limitTariff = resolveLimitTariffId(req, userId, user);
+    const limitTariff = resolveLimitTariffId(req, userId, user, data);
     if (!isFieldZoneAllowedForTariff(limitTariff, req.body.fieldZone)) {
       return res.status(403).json({
         error: 'Доступно на тарифе Про и Про+',
@@ -1502,7 +1967,7 @@ app.get('/api/user/videos', (req, res) => {
   const data = loadData();
   ensureVideosPurged(data);
   const user = findUserById(data, userId);
-  const tariff = resolveLimitTariffId(req, userId, user);
+  const tariff = resolveLimitTariffId(req, userId, user, data);
   const list = (data.videos || []).filter(v => sameEntityId(v.userId, userId));
   res.json(list.map(v => ({
     id: v.id,
@@ -1525,7 +1990,7 @@ app.get('/api/user/videos/:id/file', (req, res) => {
   const video = (data.videos || []).find(v => v.id === req.params.id && sameEntityId(v.userId, userId));
   if (!video) return res.status(404).json({ error: 'Видео не найдено' });
   const owner = findUserById(data, userId);
-  const ownerTariff = resolveLimitTariffId(req, userId, owner);
+  const ownerTariff = resolveLimitTariffId(req, userId, owner, data);
   if (!canDownloadTacticalVideoMp4(ownerTariff)) {
     return res.status(403).json({
       error: 'Скачивание видео доступно на тарифе Про+.',
@@ -1555,7 +2020,7 @@ app.get('/api/user/videos/:id', (req, res) => {
   const video = (data.videos || []).find(v => v.id === req.params.id && sameEntityId(v.userId, userId));
   if (!video) return res.status(404).json({ error: 'Видео не найдено' });
   const user = findUserById(data, userId);
-  const tariff = resolveLimitTariffId(req, userId, user);
+  const tariff = resolveLimitTariffId(req, userId, user, data);
   res.json(videoPayloadForClient(video, tariff));
 });
 
@@ -1574,7 +2039,7 @@ app.post('/api/user/videos', (req, res) => {
     const user = findUserById(data, userId);
     if (!user && userId !== 'admin') return res.status(404).json({ error: 'Пользователь не найден' });
     const previewTariff = parseAdminPreviewTariff(req, userId);
-    const tariffId = resolveLimitTariffId(req, userId, user);
+    const tariffId = resolveLimitTariffId(req, userId, user, data);
     const adminPreviewUsage =
       userId === 'admin' && previewTariff ? ensureAdminPreviewUsage(data, previewTariff) : null;
     const kfErr = validateKeyframeCount(tariffId, parsed.keyframes);
@@ -1628,7 +2093,7 @@ app.put('/api/user/videos/:id', (req, res) => {
     const data = loadData();
     const user = findUserById(data, userId);
     if (!user && userId !== 'admin') return res.status(404).json({ error: 'Пользователь не найден' });
-    const tariffId = resolveLimitTariffId(req, userId, user);
+    const tariffId = resolveLimitTariffId(req, userId, user, data);
     const kfErr = validateKeyframeCount(tariffId, parsed.keyframes);
     if (kfErr) return res.status(400).json({ error: kfErr, code: 'VIDEO_KEYFRAME_LIMIT' });
     const video = (data.videos || []).find(v => v.id === req.params.id && sameEntityId(v.userId, userId));
@@ -1668,7 +2133,7 @@ app.delete('/api/user/videos/:id', (req, res) => {
   const data = loadData();
   const user = findUserById(data, userId);
   if (!user && userId !== 'admin') return res.status(404).json({ error: 'Пользователь не найден' });
-  const tariffId = resolveLimitTariffId(req, userId, user);
+  const tariffId = resolveLimitTariffId(req, userId, user, data);
   const del = canDeleteCabinetVideo(tariffId);
   if (!del.ok) return res.status(403).json({ error: del.error, code: del.code });
   const idx = (data.videos || []).findIndex(v => v.id === req.params.id && sameEntityId(v.userId, userId));
@@ -1688,14 +2153,37 @@ app.get('/api/admin/users', (req, res) => {
   if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') return res.status(403).json({ error: 'Доступ запрещён' });
 
   const data = loadData();
-  res.json(data.users.map(u => ({
-    id: u.id, email: u.email, login: u.login, createdAt: u.createdAt,
-    tariff: normalizeStoredTariffId(u.tariff),
-    tariffExpiresAt: u.tariffExpiresAt || null,
-    blocked: !!u.blocked,
-    tariffSuspended: !!u.tariffSuspended,
-    isEditor: !!u.isEditor
-  })));
+  res.json(
+    data.users.map((u) => {
+      const org = u.organizationId ? findOrganizationById(data, u.organizationId) : null;
+      const orgTier =
+        org && org.tier
+          ? org.tier === 'corporate_pro_plus'
+            ? 'corporate_pro_plus'
+            : 'corporate_pro'
+          : null;
+      const orgOwner = org?.ownerUserId ? findUserById(data, org.ownerUserId) : null;
+      const orgSubscriptionActive = !!(org && org.tier && isOrgSubscriptionActive(org));
+      return {
+        id: u.id,
+        email: u.email,
+        login: u.login,
+        createdAt: u.createdAt,
+        tariff: normalizeStoredTariffId(u.tariff),
+        tariffExpiresAt: u.tariffExpiresAt || null,
+        blocked: !!u.blocked,
+        tariffSuspended: !!u.tariffSuspended,
+        isEditor: !!u.isEditor,
+        effectiveTariff: getEffectiveTariffId(u, data),
+        orgTier,
+        orgSubscriptionActive,
+        orgTierExpiresAt: org?.tierExpiresAt || null,
+        orgRole: u.orgRole || null,
+        tariffOwnerLogin: orgOwner?.login || null,
+        organizationName: org?.organizationName || ''
+      };
+    })
+  );
 });
 
 // Admin: выдать тариф пользователю (в т.ч. Ultima)
@@ -1710,14 +2198,32 @@ app.put('/api/admin/users/:id/tariff', (req, res) => {
   const user = findUserById(data, req.params.id);
   if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
 
+  const userOrg = user.organizationId ? findOrganizationById(data, user.organizationId) : null;
+  const isOrgOwner =
+    user.orgRole === 'owner' ||
+    !!(userOrg?.ownerUserId && sameEntityId(user.id, userOrg.ownerUserId));
+  if (userOrg && isOrgSubscriptionActive(userOrg) && !isOrgOwner) {
+    return res.status(403).json({
+      error:
+        'Пока действует корпоративная подписка организации, тариф участнику вручную сменить нельзя. Владельцу организации смена доступна; остальным — после исключения из организации или окончания корпоративного срока.'
+    });
+  }
+
   let exp = expiresAt;
   if (exp && typeof exp === 'string') {
     const s = exp.trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(s)) exp = `${s}T23:59:59.000Z`;
   }
 
+  if (tariff.id === 'corporate_pro' || tariff.id === 'corporate_pro_plus') {
+    if (!exp || !String(exp).trim()) {
+      return res.status(400).json({ error: 'Укажите дату окончания для корпоративного тарифа' });
+    }
+  }
+
   user.tariff = tariff.id;
   user.tariffExpiresAt = exp || null;
+  resetSubscriptionEmailFlags(user);
   /* Ручная выдача отменяет автопродление ЮKassa — иначе следующее списание могло вернуть старый тариф (например Про+). */
   user.yookassaPaymentMethodId = null;
   user.subscriptionNextChargeAt = null;
@@ -1760,6 +2266,400 @@ app.put('/api/admin/users/:id/editor', (req, res) => {
   user.isEditor = !!isEditor;
   saveData(data);
   res.json({ success: true, isEditor: user.isEditor });
+});
+
+function normalizeOrgTier(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (s === 'corporate_pro_plus' || s === 'corporate_pro+') return 'corporate_pro_plus';
+  return 'corporate_pro';
+}
+
+/** Дата окончания корп. подписки: YYYY-MM-DD → конец дня UTC; иначе ISO. Пустое — null. */
+function parseTierExpiresAtInput(raw) {
+  if (raw == null || raw === '') return null;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return `${s}T23:59:59.999Z`;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+function summarizeOrgForAdmin(data, org) {
+  const members = (org.memberIds || [])
+    .map((id) => findUserById(data, id))
+    .filter(Boolean)
+    .map((u) => ({
+      id: u.id,
+      login: u.login,
+      email: u.email,
+      orgRole: u.orgRole || null
+    }));
+  const ownerUser = org.ownerUserId ? findUserById(data, org.ownerUserId) : null;
+  return {
+    id: org.id,
+    tier: org.tier,
+    organizationName: org.organizationName || '',
+    contactEmail: org.contactEmail || '',
+    phone: org.phone || '',
+    contactNote: org.contactNote || '',
+    seatLimit: org.seatLimit ?? 0,
+    seatsUsed: (org.memberIds || []).length,
+    ownerUserId: org.ownerUserId || null,
+    ownerLogin: ownerUser?.login || null,
+    tierExpiresAt: org.tierExpiresAt || null,
+    subscriptionActive: isOrgSubscriptionActive(org),
+    memberIds: [...(org.memberIds || [])],
+    members
+  };
+}
+
+app.get('/api/admin/organizations', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' });
+  }
+  const data = loadData();
+  const list = (data.organizations || []).map((o) => summarizeOrgForAdmin(data, o));
+  res.json(list);
+});
+
+app.post('/api/admin/organizations', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' });
+  }
+  const {
+    ownerUserId,
+    tier,
+    seatLimit,
+    organizationName,
+    contactEmail,
+    phone,
+    contactNote,
+    tierExpiresAt: tierExpiresRaw
+  } = req.body || {};
+  const data = loadData();
+  const owner = findUserById(data, ownerUserId);
+  if (!owner) return res.status(400).json({ error: 'Владелец не найден' });
+  if (owner.organizationId) return res.status(400).json({ error: 'Пользователь уже в организации' });
+  const lim = Number(seatLimit);
+  if (!Number.isFinite(lim) || lim < 1 || lim > 500) {
+    return res.status(400).json({ error: 'Укажите число мест от 1 до 500' });
+  }
+  const tierExpiresAt = parseTierExpiresAtInput(tierExpiresRaw);
+  if (!tierExpiresAt) {
+    return res.status(400).json({ error: 'Укажите дату окончания корпоративной подписки' });
+  }
+  const orgTier = normalizeOrgTier(tier);
+  const org = {
+    id: `org_${Date.now()}`,
+    tier: orgTier,
+    seatLimit: lim,
+    ownerUserId: owner.id,
+    memberIds: [owner.id],
+    organizationName: String(organizationName || '').trim(),
+    contactEmail: String(contactEmail || '').trim(),
+    phone: String(phone || '').trim(),
+    contactNote: String(contactNote || '').trim(),
+    tierExpiresAt,
+    credentialExports: [],
+    createdAt: new Date().toISOString()
+  };
+  data.organizations.push(org);
+  owner.organizationId = org.id;
+  owner.orgRole = 'owner';
+  saveData(data);
+  res.json({ success: true, organization: summarizeOrgForAdmin(data, org) });
+});
+
+app.put('/api/admin/organizations/:id', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' });
+  }
+  const data = loadData();
+  const org = findOrganizationById(data, req.params.id);
+  if (!org) return res.status(404).json({ error: 'Организация не найдена' });
+  const {
+    seatLimit,
+    tier,
+    organizationName,
+    contactEmail,
+    phone,
+    contactNote,
+    ownerUserId,
+    tierExpiresAt: tierExpiresRaw
+  } = req.body || {};
+  if (seatLimit !== undefined) {
+    const lim = Number(seatLimit);
+    if (!Number.isFinite(lim) || lim < 1 || lim > 500) {
+      return res.status(400).json({ error: 'Укажите число мест от 1 до 500' });
+    }
+    if ((org.memberIds || []).length > lim) {
+      return res.status(400).json({ error: 'Уже занято больше мест, чем новый лимит' });
+    }
+    org.seatLimit = lim;
+  }
+  if (tier !== undefined) org.tier = normalizeOrgTier(tier);
+  if (organizationName !== undefined) org.organizationName = String(organizationName).trim();
+  if (contactEmail !== undefined) org.contactEmail = String(contactEmail).trim();
+  if (phone !== undefined) org.phone = String(phone).trim();
+  if (contactNote !== undefined) org.contactNote = String(contactNote).trim();
+  if (tierExpiresRaw !== undefined) {
+    if (tierExpiresRaw === null || tierExpiresRaw === '') org.tierExpiresAt = null;
+    else {
+      const parsed = parseTierExpiresAtInput(tierExpiresRaw);
+      if (!parsed) return res.status(400).json({ error: 'Некорректная дата окончания подписки' });
+      org.tierExpiresAt = parsed;
+    }
+  }
+  if (ownerUserId !== undefined && ownerUserId !== org.ownerUserId) {
+    const newOwner = findUserById(data, ownerUserId);
+    if (!newOwner) return res.status(400).json({ error: 'Новый владелец не найден' });
+    if (newOwner.organizationId && newOwner.organizationId !== org.id) {
+      return res.status(400).json({ error: 'Пользователь уже в другой организации' });
+    }
+    const oldOid = org.ownerUserId;
+    const oldOwner = findUserById(data, oldOid);
+    if (oldOwner) oldOwner.orgRole = 'member';
+    if (!org.memberIds.includes(newOwner.id)) org.memberIds.push(newOwner.id);
+    newOwner.organizationId = org.id;
+    newOwner.orgRole = 'owner';
+    org.ownerUserId = newOwner.id;
+  }
+  saveData(data);
+  res.json({ success: true, organization: summarizeOrgForAdmin(data, org) });
+});
+
+app.get('/api/org/mine', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' });
+  const uid = getUserIdFromRequest(req);
+  if (uid === 'admin') return res.status(403).json({ error: 'Недоступно' });
+  const data = loadData();
+  const user = findUserById(data, uid);
+  if (!user || !user.organizationId) return res.json({ organization: null, members: [] });
+  const org = findOrganizationById(data, user.organizationId);
+  if (!org) return res.json({ organization: null, members: [] });
+  const members = (org.memberIds || [])
+    .map((id) => findUserById(data, id))
+    .filter(Boolean)
+    .map((u) => ({ id: u.id, login: u.login, email: u.email, orgRole: u.orgRole || null }));
+  res.json({
+    organization: organizationPayloadForClient(data, org, user),
+    members,
+    /** Всего записей с логинами/паролями для выгрузки; не очищается после скачивания */
+    credentialExportCount: (org.credentialExports || []).length,
+    isOwner: user.orgRole === 'owner'
+  });
+});
+
+app.put('/api/org/settings', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' });
+  const uid = getUserIdFromRequest(req);
+  if (uid === 'admin') return res.status(403).json({ error: 'Недоступно' });
+  const data = loadData();
+  const user = findUserById(data, uid);
+  if (!user || user.orgRole !== 'owner' || !user.organizationId) {
+    return res.status(403).json({ error: 'Только владелец организации может менять реквизиты' });
+  }
+  const org = findOrganizationById(data, user.organizationId);
+  if (!org) return res.status(404).json({ error: 'Организация не найдена' });
+  const { organizationName, contactEmail, phone, contactNote } = req.body || {};
+  if (organizationName !== undefined) org.organizationName = String(organizationName).trim();
+  if (contactEmail !== undefined) org.contactEmail = String(contactEmail).trim();
+  if (phone !== undefined) org.phone = String(phone).trim();
+  if (contactNote !== undefined) org.contactNote = String(contactNote).trim();
+  saveData(data);
+  res.json({ success: true, organization: organizationPayloadForClient(data, org, user) });
+});
+
+function parseOrgMemberEmailsInput(body) {
+  const out = [];
+  const b = body || {};
+  if (Array.isArray(b.emails)) {
+    for (const e of b.emails) {
+      const s = String(e).trim().toLowerCase();
+      if (s && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) out.push(s);
+    }
+  } else if (String(b.emailsText || '').trim()) {
+    const parts = String(b.emailsText).split(/[\n,;]+/);
+    for (const p of parts) {
+      const s = p.trim().toLowerCase();
+      if (s && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) out.push(s);
+    }
+  } else if (String(b.email || '').trim()) {
+    const s = String(b.email).trim().toLowerCase();
+    if (s && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) out.push(s);
+  }
+  return [...new Set(out)];
+}
+
+app.post('/api/org/members', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' });
+  const uid = getUserIdFromRequest(req);
+  if (uid === 'admin') return res.status(403).json({ error: 'Недоступно' });
+  const data = loadData();
+  const owner = findUserById(data, uid);
+  if (!owner || owner.orgRole !== 'owner' || !owner.organizationId) {
+    return res.status(403).json({ error: 'Только владелец может добавлять участников' });
+  }
+  const org = findOrganizationById(data, owner.organizationId);
+  if (!org) return res.status(404).json({ error: 'Организация не найдена' });
+
+  const emailsList = parseOrgMemberEmailsInput(req.body);
+  if (emailsList.length === 0) {
+    return res.status(400).json({ error: 'Укажите хотя бы один корректный email (по одному в строке или через запятую)' });
+  }
+
+  const results = [];
+  org.credentialExports = org.credentialExports || [];
+
+  for (const rawEmail of emailsList) {
+    if ((org.memberIds || []).length >= org.seatLimit) {
+      results.push({ email: rawEmail, ok: false, error: 'Достигнут лимит мест' });
+      continue;
+    }
+
+    const existing = data.users.find((u) => u.email && String(u.email).toLowerCase() === rawEmail);
+    if (existing) {
+      if (existing.organizationId === org.id) {
+        results.push({ email: rawEmail, ok: false, error: 'Уже в этой организации' });
+        continue;
+      }
+      if (existing.organizationId) {
+        results.push({ email: rawEmail, ok: false, error: 'Уже в другой организации' });
+        continue;
+      }
+      existing.organizationId = org.id;
+      existing.orgRole = 'member';
+      org.memberIds.push(existing.id);
+      results.push({
+        email: rawEmail,
+        ok: true,
+        mode: 'linked',
+        user: { id: existing.id, login: existing.login, email: existing.email }
+      });
+      continue;
+    }
+
+    const plain = randomInvitePassword(14);
+    const local = rawEmail.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '') || 'user';
+    let finalLogin = local;
+    let n = 0;
+    while (data.users.some((u) => u.login === finalLogin)) {
+      finalLogin = `${local}${++n}`;
+    }
+    const newUser = {
+      id: `${Date.now()}_${randomBytes(4).toString('hex')}`,
+      email: rawEmail,
+      login: finalLogin,
+      password: hashPassword(plain),
+      isAdmin: false,
+      tariff: 'free',
+      accountRole: 'user',
+      mustChangePassword: true,
+      organizationId: org.id,
+      orgRole: 'member',
+      createdAt: new Date().toISOString()
+    };
+    data.users.push(newUser);
+    org.memberIds.push(newUser.id);
+    org.credentialExports.push({
+      login: finalLogin,
+      email: rawEmail,
+      plainPassword: plain,
+      userId: newUser.id,
+      createdAt: new Date().toISOString()
+    });
+    results.push({
+      email: rawEmail,
+      ok: true,
+      mode: 'created',
+      user: { id: newUser.id, login: finalLogin, email: rawEmail, temporaryPassword: plain }
+    });
+  }
+
+  saveData(data);
+  const members = (org.memberIds || [])
+    .map((id) => findUserById(data, id))
+    .filter(Boolean)
+    .map((u) => ({ id: u.id, login: u.login, email: u.email, orgRole: u.orgRole || null }));
+  res.json({
+    success: true,
+    results,
+    organization: organizationPayloadForClient(data, org, owner),
+    members,
+    /** Всего записей с логинами/паролями для выгрузки; не очищается после скачивания */
+    credentialExportCount: (org.credentialExports || []).length,
+    isOwner: true
+  });
+});
+
+app.delete('/api/org/members/:memberId', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' });
+  const uid = getUserIdFromRequest(req);
+  if (uid === 'admin') return res.status(403).json({ error: 'Недоступно' });
+  const data = loadData();
+  const owner = findUserById(data, uid);
+  if (!owner || owner.orgRole !== 'owner' || !owner.organizationId) {
+    return res.status(403).json({ error: 'Только владелец может удалять участников' });
+  }
+  const org = findOrganizationById(data, owner.organizationId);
+  if (!org) return res.status(404).json({ error: 'Организация не найдена' });
+
+  const memberId = req.params.memberId;
+  if (sameEntityId(memberId, owner.id)) {
+    return res.status(400).json({ error: 'Нельзя удалить свою учётную запись' });
+  }
+  if (sameEntityId(memberId, org.ownerUserId)) {
+    return res.status(400).json({ error: 'Нельзя удалить владельца организации' });
+  }
+
+  const target = findUserById(data, memberId);
+  if (!target || !sameEntityId(target.organizationId, org.id)) {
+    return res.status(404).json({ error: 'Участник не найден в этой организации' });
+  }
+
+  org.memberIds = (org.memberIds || []).filter((id) => !sameEntityId(id, memberId));
+  delete target.organizationId;
+  delete target.orgRole;
+
+  org.credentialExports = (org.credentialExports || []).filter((e) => !sameEntityId(e.userId, memberId));
+
+  saveData(data);
+  const members = (org.memberIds || [])
+    .map((id) => findUserById(data, id))
+    .filter(Boolean)
+    .map((u) => ({ id: u.id, login: u.login, email: u.email, orgRole: u.orgRole || null }));
+  res.json({
+    success: true,
+    organization: organizationPayloadForClient(data, org, owner),
+    members,
+    credentialExportCount: (org.credentialExports || []).length,
+    isOwner: true
+  });
+});
+
+app.get('/api/org/credentials-export', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' });
+  const uid = getUserIdFromRequest(req);
+  if (uid === 'admin') return res.status(403).json({ error: 'Недоступно' });
+  const data = loadData();
+  const user = findUserById(data, uid);
+  if (!user || user.orgRole !== 'owner' || !user.organizationId) {
+    return res.status(403).json({ error: 'Только владелец может выгружать учётные данные' });
+  }
+  const org = findOrganizationById(data, user.organizationId);
+  if (!org) return res.status(404).json({ error: 'Организация не найдена' });
+  const rows = org.credentialExports || [];
+  /** Разделитель «;» — в Excel с русской локалью колонки открываются как таблица; порядок: email, логин, пароль */
+  const delim = ';';
+  const esc = (s) => `"${String(s).replace(/"/g, '""')}"`;
+  const lines = [`email${delim}login${delim}password`];
+  for (const r of rows) {
+    lines.push([esc(r.email), esc(r.login), esc(r.plainPassword)].join(delim));
+  }
+  /* Архив не очищаем — файл можно скачивать повторно; новые строки добавляются при создании учёток */
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="organization-logins.csv"');
+  res.send('\uFEFF' + lines.join('\n'));
 });
 
 // —— Каталог готовых упражнений (libraryItems) ——
@@ -1827,7 +2727,7 @@ app.get('/api/library', (req, res) => {
   } else {
     const user = findUserById(data, userId);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-    effective = getEffectiveTariffId(user);
+    effective = getEffectiveTariffId(user, data);
   }
   const folders = [...(data.libraryFolders || [])].sort(
     (a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.title || '').localeCompare(String(b.title || ''), 'ru')
@@ -1869,7 +2769,7 @@ app.get('/api/library/:id', (req, res) => {
   } else {
     const user = findUserById(data, userId);
     if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
-    effective = getEffectiveTariffId(user);
+    effective = getEffectiveTariffId(user, data);
   }
   if (!item.published && !canManageLibrary(req)) {
     return res.status(404).json({ error: 'Не найдено' });
@@ -2032,22 +2932,45 @@ app.get('/api/admin/stats', (req, res) => {
   if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') return res.status(403).json({ error: 'Доступ запрещён' });
 
   const data = loadData();
+  if (mergePendingRequestLoadsInto(data)) saveData(data);
+
   const users = data.users || [];
   const plans = data.plans || [];
   const boards = data.boards || [];
   const videos = data.videos || [];
   const purchases = data.purchases || [];
 
-  const tariffBreakdown = { free: 0, pro: 0, pro_plus: 0, admin: 0 };
+  const tariffBreakdown = {
+    free: 0,
+    pro: 0,
+    pro_plus: 0,
+    admin: 0,
+    corporate_pro: 0,
+    corporate_pro_plus: 0
+  };
   let blockedCount = 0;
   let tariffSuspendedCount = 0;
   let withSavedPaymentMethod = 0;
   let usageSum = { pdfDownloads: 0, wordDownloads: 0, boardDownloads: 0, plansCreated: 0 };
 
   users.forEach((u) => {
-    const t = normalizeTariffIdForLimits(u.tariff);
-    if (Object.prototype.hasOwnProperty.call(tariffBreakdown, t)) tariffBreakdown[t] += 1;
-    else tariffBreakdown.free += 1;
+    if (u.tariffSuspended) {
+      tariffBreakdown.free += 1;
+    } else if (u.organizationId) {
+      const org = findOrganizationById(data, u.organizationId);
+      if (org && org.tier && isOrgSubscriptionActive(org)) {
+        if (org.tier === 'corporate_pro_plus') tariffBreakdown.corporate_pro_plus += 1;
+        else tariffBreakdown.corporate_pro += 1;
+      } else {
+        const t = normalizeTariffIdForLimits(u.tariff);
+        if (Object.prototype.hasOwnProperty.call(tariffBreakdown, t)) tariffBreakdown[t] += 1;
+        else tariffBreakdown.free += 1;
+      }
+    } else {
+      const t = normalizeTariffIdForLimits(u.tariff);
+      if (Object.prototype.hasOwnProperty.call(tariffBreakdown, t)) tariffBreakdown[t] += 1;
+      else tariffBreakdown.free += 1;
+    }
     if (u.blocked) blockedCount += 1;
     if (u.tariffSuspended) tariffSuspendedCount += 1;
     if (u.yookassaPaymentMethodId) withSavedPaymentMethod += 1;
@@ -2143,6 +3066,23 @@ app.get('/api/admin/stats', (req, res) => {
     .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')))
     .slice(0, 80);
 
+  const buckets = { ...(data.requestLoadBuckets || {}) };
+  let requestLoadTotal = 0;
+  for (const v of Object.values(buckets)) requestLoadTotal += v;
+  const requestLoadSorted = Object.entries(buckets)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([key, count]) => ({
+      key,
+      count,
+      pct: requestLoadTotal ? Math.round((count / requestLoadTotal) * 1000) / 10 : 0,
+      label: REQUEST_LOAD_LABELS_RU[key] || key
+    }));
+
+  const b3 = data.board3dAnalytics || {};
+  const unique3d = Array.isArray(b3.uniqueUserIds) ? b3.uniqueUserIds.length : 0;
+  const board3dBySource = b3.bySource && typeof b3.bySource === 'object' ? { ...b3.bySource } : {};
+
   res.json({
     generatedAt: new Date().toISOString(),
     totals: {
@@ -2173,18 +3113,47 @@ app.get('/api/admin/stats', (req, res) => {
     sumsLast30Days: sum30,
     last7Days,
     topUsersByPlans: topUsersFromCounts(planCounts, users, 5),
-    recentUsers: sortedUsers.slice(0, 8).map((u) => ({
-      id: u.id,
-      login: u.login,
-      email: u.email,
-      createdAt: u.createdAt,
-      tariff: u.tariff || 'free',
-      blocked: !!u.blocked,
-      tariffSuspended: !!u.tariffSuspended
-    })),
+    recentUsers: sortedUsers.slice(0, 8).map((u) => {
+      const org = u.organizationId ? findOrganizationById(data, u.organizationId) : null;
+      const orgTier =
+        org && org.tier
+          ? org.tier === 'corporate_pro_plus'
+            ? 'corporate_pro_plus'
+            : 'corporate_pro'
+          : null;
+      const orgOwner = org?.ownerUserId ? findUserById(data, org.ownerUserId) : null;
+      const orgSubscriptionActive = !!(org && org.tier && isOrgSubscriptionActive(org));
+      return {
+        id: u.id,
+        login: u.login,
+        email: u.email,
+        createdAt: u.createdAt,
+        tariff: u.tariff || 'free',
+        blocked: !!u.blocked,
+        tariffSuspended: !!u.tariffSuspended,
+        effectiveTariff: getEffectiveTariffId(u, data),
+        orgTier,
+        orgSubscriptionActive,
+        orgTierExpiresAt: org?.tierExpiresAt || null,
+        orgRole: u.orgRole || null,
+        tariffOwnerLogin: orgOwner?.login || null,
+        organizationName: org?.organizationName || ''
+      };
+    }),
     recentActivity,
     deviceStats,
-    deviceUserLog
+    deviceUserLog,
+    requestLoad: {
+      total: requestLoadTotal,
+      buckets,
+      sorted: requestLoadSorted
+    },
+    board3d: {
+      totalOpens: b3.totalOpens || 0,
+      uniqueUsers: unique3d,
+      opensLast14Days: buildBoard3dOpensSeries(14, b3.eventsByDay),
+      bySource: board3dBySource
+    }
   });
 });
 
@@ -2251,6 +3220,86 @@ app.put('/api/admin/pages', (req, res) => {
   }
 });
 
+// База знаний (обучение / FAQ): чтение в кабинете
+app.get('/api/help/center', (req, res) => {
+  if (!getBearerToken(req)) return res.status(401).json({ error: 'Не авторизован' });
+  const uid = getUserIdFromRequest(req);
+  if (!uid) return res.status(401).json({ error: 'Не авторизован' });
+  const admin = loadAdmin();
+  ensureHelpCenter(admin);
+  res.json(admin.helpCenter);
+});
+
+app.get('/api/admin/help/center', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' });
+  }
+  const admin = loadAdmin();
+  ensureHelpCenter(admin);
+  res.json(admin.helpCenter);
+});
+
+app.put('/api/admin/help/center', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' });
+  }
+  const out = validateAndNormalizeHelpCenter(req.body);
+  if (!out.ok) return res.status(400).json({ error: out.error });
+  try {
+    const admin = loadAdmin();
+    admin.helpCenter = out.helpCenter;
+    saveAdmin(admin);
+    res.json({ success: true, helpCenter: admin.helpCenter });
+  } catch (err) {
+    console.error('[admin help center]', err);
+    res.status(500).json({ error: err.message || 'Ошибка сохранения' });
+  }
+});
+
+app.post('/api/admin/help/upload-image', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' });
+  }
+  helpImageUpload.single('file')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({
+        error: err.code === 'LIMIT_FILE_SIZE' ? 'Файл слишком большой' : err.message || 'Ошибка загрузки'
+      });
+    }
+    if (!req.file?.buffer) return res.status(400).json({ error: 'Нет файла' });
+    if (!validateHelpImageMime(req.file.mimetype)) return res.status(400).json({ error: 'Допустимы JPEG, PNG, GIF, WebP' });
+    const name = helpImageFilename(req.file.mimetype);
+    try {
+      writeFileSync(join(UPLOADS_HELP_IMAGES, name), req.file.buffer);
+    } catch (e) {
+      return res.status(500).json({ error: 'Не удалось сохранить файл' });
+    }
+    res.json({ url: `/uploads/help/images/${name}` });
+  });
+});
+
+app.post('/api/admin/help/upload-video', (req, res) => {
+  if (!getBearerToken(req) || getUserIdFromRequest(req) !== 'admin') {
+    return res.status(403).json({ error: 'Доступ запрещён' });
+  }
+  helpVideoUpload.single('file')(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({
+        error: err.code === 'LIMIT_FILE_SIZE' ? 'Файл слишком большой' : err.message || 'Ошибка загрузки'
+      });
+    }
+    if (!req.file?.buffer) return res.status(400).json({ error: 'Нет файла' });
+    if (!validateHelpVideoMime(req.file.mimetype)) return res.status(400).json({ error: 'Допустимы MP4 и WebM' });
+    const name = helpVideoFilename(req.file.mimetype);
+    try {
+      writeFileSync(join(UPLOADS_HELP_VIDEOS, name), req.file.buffer);
+    } catch (e) {
+      return res.status(500).json({ error: 'Не удалось сохранить файл' });
+    }
+    res.json({ url: `/uploads/help/videos/${name}` });
+  });
+});
+
 // Public: get landing page content (for editable pages)
 app.get('/api/pages/landing', (req, res) => {
   const admin = loadAdmin();
@@ -2275,6 +3324,12 @@ app.get('*', (req, res) => {
 function tryListen(port) {
   const server = app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
+    const wanted = Number(PORT);
+    if (port !== wanted) {
+      console.warn(
+        `[hockey] API слушает порт ${port} (порт ${wanted} занят). Прокси Vite читает PORT из .env — задайте PORT=${port} или освободите порт ${wanted}.`
+      );
+    }
     try {
       const a = loadAdmin();
       if (!a.password && !getAdminPasswordFallback()) {
@@ -2293,14 +3348,44 @@ function tryListen(port) {
     }
   });
 }
-tryListen(PORT);
-
-setInterval(() => {
+function isMainScript() {
+  const a = process.argv[1];
+  if (!a) return false;
   try {
-    const data = loadData();
-    if (processSubscriptionGraceDowngrades(data)) saveData(data);
-  } catch (e) {
-    console.error('[subscription grace]', e);
+    return resolve(a) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
   }
-  yooService.runRenewalPass().catch((e) => console.error('[subscription renewal]', e));
-}, 60 * 1000);
+}
+
+export { app };
+
+if (isMainScript()) {
+  tryListen(PORT);
+
+  setInterval(() => {
+    ;(async () => {
+      try {
+        await withDataFileLock(async () => {
+          const data = loadData();
+          if (runSubscriptionMaintenance(data)) saveData(data);
+        });
+      } catch (e) {
+        console.error('[subscription grace]', e);
+      }
+      try {
+        await withDataFileLock(async () => {
+          const data = loadData();
+          await runSubscriptionEmailNotifications(data, saveData);
+        });
+      } catch (e) {
+        console.error('[subscription emails]', e);
+      }
+      try {
+        await yooService.runRenewalPass();
+      } catch (e) {
+        console.error('[subscription renewal]', e);
+      }
+    })();
+  }, 60 * 1000);
+}

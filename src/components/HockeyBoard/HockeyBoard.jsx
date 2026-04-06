@@ -1,9 +1,46 @@
-import { useRef, useEffect, useLayoutEffect, useState, useCallback, useMemo, forwardRef, useImperativeHandle, Fragment } from 'react'
+import {
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  useCallback,
+  useMemo,
+  forwardRef,
+  useImperativeHandle,
+  Fragment,
+  cloneElement,
+  isValidElement
+} from 'react'
 import { createPortal } from 'react-dom'
 import { Undo2, Redo2, ClipboardPaste, Trash2, Download, ChevronDown, ChevronUp, Pencil, GripVertical } from 'lucide-react'
 import { useMediaQuery } from '../../hooks/useMediaQuery'
-import { toolIcons, NineDotsMenuIcon } from './ToolIcons'
+import { toolIcons, NineDotsMenuIcon, WAVE_MOVEMENT_ICONS } from './ToolIcons'
 import { newEntityId } from '../../utils/boardEntityId'
+import { getWavyPath } from '../../utils/pathWavy'
+import { RINK3D_ORBIT_MIN_DIST, RINK3D_ORBIT_MAX_DIST, RINK3D_ORBIT_DEFAULT_DIST } from '../Rink3D/rink3dOrbitConstants'
+import { isRotatablePersonIconType, iconSupports3dToolbarRotation } from '../Rink3D/icon3dAssets'
+import { BOARD_ACTIVITY_TURN_ICON_R_PX } from '../../utils/rink3dMapping'
+import { buildUTurnStrokePathD, buildUTurnArrowPathD } from '../../utils/uTurnIconPath'
+
+/** Угол в данных 0…360 → ползунок −180…180 */
+function storedAngleToSliderSigned(deg) {
+  let a = Number(deg) || 0
+  a = ((a % 360) + 360) % 360
+  if (a > 180) a -= 360
+  return Math.round(a)
+}
+
+/** Ползунок −180…180 → хранение 0…360 */
+function signedSliderToStoredAngle(signed) {
+  return ((Number(signed) % 360) + 360) % 360
+}
+import {
+  DROP_PASS_PATH_D,
+  DROP_PASS_GROUP_TX,
+  DROP_PASS_GROUP_TY,
+  DROP_PASS_VIEWBOX_CX,
+  DROP_PASS_VIEWBOX_CY
+} from '../../utils/dropPassIconPath'
 import './HockeyBoard.css'
 
 const RINK_IMG = '/assets/hockey-rink.png'
@@ -21,14 +58,14 @@ function setImageSrc(img, src) {
 export const TOOLS = [
   { id: 'select', label: 'Выбор' },
   { id: 'pen', label: 'Карандаш' },
-  { id: 'line', label: 'Линия' },
+  /** Линия, прямоугольник, круг — активный режим `line` | `rect` | `circle` (подменю). */
+  { id: 'shapes', label: 'Фигуры' },
   { id: 'curve', label: 'Движение' },
   { id: 'lateral', label: 'Боковое перемещение' },
-  { id: 'arrow', label: 'Бег лицом вперед' },
-  { id: 'pass', label: 'Передача' },
-  { id: 'shot', label: 'Бросок' },
-  { id: 'rect', label: 'Прямоугольник' },
-  { id: 'circle', label: 'Круг' },
+  /** Одна кнопка: бег вперёд, передача, бросок — активный режим `arrow` | `pass` | `shot` (подменю). */
+  { id: 'passShot', label: 'Бег, передача, бросок' },
+  /** Поворот / разворот / передача паса — подменю «Активность». */
+  { id: 'activity', label: 'Активность' },
   { id: 'eraser', label: 'Ластик' },
   { id: 'player', label: 'Игрок' },
   { id: 'playerTriangle', label: 'Игрок (треугольник)' },
@@ -39,9 +76,8 @@ export const TOOLS = [
   { id: 'numbers', label: 'Цифры' },
   { id: 'puck', label: 'Шайба' },
   { id: 'puckCluster', label: 'Мелкие шайбы' },
-  { id: 'goal', label: 'Ворота' },
-  { id: 'cone', label: 'Конус' },
-  { id: 'barrier', label: 'Барьер' }
+  /** Ворота, конус, барьер — активный режим `goal` | `cone` | `barrier` (подменю). */
+  { id: 'rinkItems', label: 'Предметы' }
 ]
 
 /** На мобильном shell: в панели «папка» — все, кроме быстрых снизу и «Движение». */
@@ -81,6 +117,11 @@ function shouldDeferPlacement(tool, hitKey) {
     tool === 'goal' ||
     tool === 'cone' ||
     tool === 'barrier' ||
+    tool === 'turnRight' ||
+    tool === 'turnLeft' ||
+    tool === 'uTurnRight' ||
+    tool === 'uTurnLeft' ||
+    tool === 'dropPass' ||
     ['line', 'arrow', 'pass', 'shot', 'rect', 'circle'].includes(tool)
   )
 }
@@ -154,51 +195,6 @@ const WAVE_STYLES = [
   { id: 'double', label: 'Бег спиной вперед' },
   { id: 'dashedDouble', label: 'Бег спиной вперед с шайбой' }
 ]
-
-function getWavyPath(points, amplitude = 8, wavelength = 25, step = 2.5) {
-  if (!points || points.length < 2) return points
-  const resampled = []
-  let pathDist = 0
-  let targetDist = 0
-  for (let i = 0; i < points.length - 1; i++) {
-    const p0 = points[i]
-    const p1 = points[i + 1]
-    const segLen = Math.hypot(p1.x - p0.x, p1.y - p0.y)
-    if (segLen < 0.001) continue
-    while (targetDist < pathDist + segLen - 0.01) {
-      const t = (targetDist - pathDist) / segLen
-      resampled.push({
-        x: p0.x + (p1.x - p0.x) * t,
-        y: p0.y + (p1.y - p0.y) * t,
-        d: targetDist
-      })
-      targetDist += step
-    }
-    pathDist += segLen
-  }
-  resampled.push({ x: points[points.length - 1].x, y: points[points.length - 1].y, d: pathDist })
-  const result = []
-  for (let i = 0; i < resampled.length; i++) {
-    const p = resampled[i]
-    let dx = 0, dy = 0
-    if (i > 0 && i < resampled.length - 1) {
-      dx = resampled[i + 1].x - resampled[i - 1].x
-      dy = resampled[i + 1].y - resampled[i - 1].y
-    } else if (i === 0 && resampled.length > 1) {
-      dx = resampled[1].x - p.x
-      dy = resampled[1].y - p.y
-    } else if (i > 0) {
-      dx = p.x - resampled[i - 1].x
-      dy = p.y - resampled[i - 1].y
-    }
-    const len = Math.hypot(dx, dy) || 1
-    const perpX = -dy / len
-    const perpY = dx / len
-    const offset = amplitude * Math.sin((p.d * Math.PI * 2) / wavelength)
-    result.push({ x: p.x + perpX * offset, y: p.y + perpY * offset, d: p.d })
-  }
-  return result
-}
 
 function distToSegment(px, py, x1, y1, x2, y2) {
   const A = px - x1, B = py - y1, C = x2 - x1, D = y2 - y1
@@ -287,6 +283,121 @@ function iconIntersectsRect(ic, x1, y1, x2, y2, shellIconScale = 1) {
 }
 
 const GOAL_ICON_R = 22
+
+/**
+ * 2D: «поворот направо/налево» — как линия «бросок» (doubleArrow): две параллельные полосы по дуге + белая головка с обводкой.
+ * Геометрия головы совпадает с отрисовкой doubleArrow (shaftHalf / headHalf / headLen).
+ */
+function drawActivityTurnIcon2D(ctx, ic, shellIconScale, color) {
+  const sc = shellIconScale
+  const shaftHalf = 4 * sc
+  const headHalf = 7 * sc
+  const headLen = 14 * sc
+  const R = 10 * sc
+  const cx = -3.5 * sc
+  const cy = 5 * sc
+  const θTip = -Math.PI / 2
+  /** Узел шеи на центральной дуге: длина дуги от шеи к острию = headLen (как у броска). */
+  const θNeck = θTip + headLen / R
+  const θStart = Math.PI
+  const steps = 20
+  const ro = R + shaftHalf
+  const ri = R - shaftHalf
+  const tipX = cx + R * Math.cos(θTip)
+  const tipY = cy + R * Math.sin(θTip)
+  const neckCx = cx + R * Math.cos(θNeck)
+  const neckCy = cy + R * Math.sin(θNeck)
+  /** Направление хорды шея→остриё (как прямой бросок от шеи к концу). */
+  const chordAngle = Math.atan2(tipY - neckCy, tipX - neckCx)
+  const perpX = -Math.sin(chordAngle)
+  const perpY = Math.cos(chordAngle)
+  const baseX = tipX - headLen * Math.cos(chordAngle)
+  const baseY = tipY - headLen * Math.sin(chordAngle)
+  const n2x = cx + ri * Math.cos(θNeck)
+  const n2y = cy + ri * Math.sin(θNeck)
+  const w1x = baseX - perpX * headHalf
+  const w1y = baseY - perpY * headHalf
+  const w2x = baseX + perpX * headHalf
+  const w2y = baseY + perpY * headHalf
+  const a1x = cx + ro * Math.cos(θStart)
+  const a1y = cy + ro * Math.sin(θStart)
+  const a2x = cx + ri * Math.cos(θStart)
+  const a2y = cy + ri * Math.sin(θStart)
+
+  ctx.save()
+  ctx.translate(ic.x, ic.y)
+  const angleRad = ((ic.angle || 0) * Math.PI) / 180
+  ctx.rotate(-angleRad)
+  if (ic.type === 'turnRight') ctx.scale(-1, 1)
+
+  ctx.beginPath()
+  ctx.moveTo(a1x, a1y)
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps
+    const θ = θStart + t * (θNeck - θStart)
+    ctx.lineTo(cx + ro * Math.cos(θ), cy + ro * Math.sin(θ))
+  }
+  ctx.lineTo(w1x, w1y)
+  ctx.lineTo(tipX, tipY)
+  ctx.lineTo(w2x, w2y)
+  ctx.lineTo(n2x, n2y)
+  for (let i = steps - 1; i >= 0; i--) {
+    const t = i / steps
+    const θ = θStart + t * (θNeck - θStart)
+    ctx.lineTo(cx + ri * Math.cos(θ), cy + ri * Math.sin(θ))
+  }
+  ctx.closePath()
+  ctx.fillStyle = '#ffffff'
+  ctx.fill()
+  ctx.strokeStyle = color
+  ctx.lineWidth = Math.max(2, 2 * sc)
+  ctx.lineJoin = 'miter'
+  ctx.lineCap = 'butt'
+  ctx.stroke()
+  ctx.restore()
+}
+
+/**
+ * 2D: «разворот» — та же векторная геометрия, что и в uTurnIconPath (дуга 270° + выход + шеврон).
+ * uTurnLeft: зеркально по X.
+ */
+function drawActivityUTurnIcon2D(ctx, ic, shellIconScale, color) {
+  const sc = shellIconScale
+  const strokePath = new Path2D(buildUTurnStrokePathD(sc))
+  const arrowPath = new Path2D(buildUTurnArrowPathD(sc))
+
+  ctx.save()
+  ctx.translate(ic.x, ic.y)
+  const angleRad = ((ic.angle || 0) * Math.PI) / 180
+  ctx.rotate(-angleRad)
+  if (ic.type === 'uTurnLeft') ctx.scale(-1, 1)
+
+  ctx.strokeStyle = color
+  ctx.lineWidth = Math.max(2, 2 * sc)
+  ctx.lineCap = 'round'
+  ctx.lineJoin = 'round'
+  ctx.stroke(strokePath)
+  ctx.lineJoin = 'miter'
+  ctx.lineCap = 'butt'
+  ctx.stroke(arrowPath)
+  ctx.restore()
+}
+
+/** 2D: «передача паса» — заливка по path из drop_pass.svg (тот же контур, что в тулбаре). */
+function drawActivityDropPassIcon2D(ctx, ic, shellIconScale, color) {
+  const p = new Path2D(DROP_PASS_PATH_D)
+  ctx.save()
+  ctx.translate(ic.x, ic.y)
+  const angleRad = ((ic.angle || 0) * Math.PI) / 180
+  ctx.rotate(-angleRad)
+  ctx.scale(shellIconScale, shellIconScale)
+  ctx.translate(-DROP_PASS_VIEWBOX_CX, -DROP_PASS_VIEWBOX_CY)
+  ctx.translate(DROP_PASS_GROUP_TX, DROP_PASS_GROUP_TY)
+  ctx.fillStyle = color
+  ctx.fill(p)
+  ctx.restore()
+}
+
 /** Мобильный shell: крупнее маркеры игроков, ворот, тренера, вратаря, препятствий (десктоп без изменений). */
 const MOBILE_SHELL_ICON_SCALE = 1.38
 /** После contain: слегка уменьшить холст (большая сторона −N px, вторая пропорционально), небольшой внутренний отступ. */
@@ -333,7 +444,16 @@ function hitTestIcon(ic, coords, shellIconScale = 1) {
     }
     return Math.hypot(coords.x - ic.x, coords.y - ic.y) < PUCK_CLUSTER_SPREAD + PUCK_CLUSTER_DOT_R + 3
   }
-  if (ic.type === 'cone' || ic.type === 'barrier') return Math.hypot(coords.x - ic.x, coords.y - ic.y) < 16 * shellIconScale
+  if (
+    ic.type === 'cone' ||
+    ic.type === 'barrier' ||
+    ic.type === 'turnRight' ||
+    ic.type === 'turnLeft' ||
+    ic.type === 'uTurnRight' ||
+    ic.type === 'uTurnLeft' ||
+    ic.type === 'dropPass'
+  )
+    return Math.hypot(coords.x - ic.x, coords.y - ic.y) < 16 * shellIconScale
   if (ic.type === 'numberMark') {
     const pad = (ic.num?.length || 1) > 1 ? 18 : 12
     return Math.hypot(coords.x - ic.x, coords.y - ic.y) < pad
@@ -349,6 +469,9 @@ function getGoalRotationHandlePos(ic, goalRadius = GOAL_ICON_R) {
     y: ic.y + dist * Math.cos(angle)
   }
 }
+
+/** Радиус «тела» для hit-test (как hitTestIcon для игроков), чтобы клик по ручке не считался телом. */
+const PERSON_ICON_BODY_HIT_R = 14
 
 function hitTestPath(p, coords) {
   if (p.type === 'path') {
@@ -395,6 +518,16 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     onDownloadPng,
     customBackgrounds = {},
     fitCanvasToContainer = false,
+    /**
+     * Только для тактической доски / видео на десктопе: панель под шапкой с position:fixed — нужен padding-top у корня,
+     * иначе холст уезжает под панель. В план-конспекте и каталоге панель в потоке — false.
+     */
+    reserveFixedToolbarPadding = false,
+    /**
+     * При fitCanvasToContainer: после contain уменьшить большую сторону на N px (внутренний зазор).
+     * По умолчанию 20. План-конспект может передать меньше — холст визуально крупнее.
+     */
+    fitDisplayShrinkPx,
     /** На узких экранах не сворачивать панель в одну строку «Инструменты» (страница видео и т.п.). */
     alwaysShowFullMobileToolbar = false,
     /** Слои снизу вверх: { id?, paths, icons, dimmed } — неактивные рисуются серыми. */
@@ -413,20 +546,51 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     /** Если задан массив id инструментов — в панели только они (как у пользователей в каталоге). */
     allowedToolIds = null,
     /** Тактическая доска (десктоп): номер игрока во всплывающем окне, как в мобильном shell. */
-    floatingPlayerIndex = false
+    floatingPlayerIndex = false,
+    /** '3d' + threeDContent: панель инструментов остаётся, под ней 3D; холст 2D прозрачен, клики идут в ту же сетку координат. */
+    boardViewMode = '2d',
+    threeDContent = null,
+    /** Кастомные GLB иконок в 3D: база `.../type.glb` (см. public/assets/3d-icons/README.md). */
+    icon3dAssetBaseUrl,
+    /** Явные URL по type (перекрывают base и icon3dAssets.ICON_3D_GLB_URLS). */
+    icon3dGlbUrls,
+    /** Внешний колбэк: canvas WebGL из 3D-сцены (например запись видео). При уходе из 3D — `null`. */
+    onWebGLCanvasReady: onWebGLCanvasReadyProp
   },
   ref
 ) {
   const toolsForToolbar = useMemo(() => {
     if (!allowedToolIds || !Array.isArray(allowedToolIds) || allowedToolIds.length === 0) return TOOLS
     const set = new Set(allowedToolIds)
-    return TOOLS.filter((t) => set.has(t.id))
+    return TOOLS.filter((t) => {
+      if (t.id === 'passShot') return set.has('passShot') || set.has('arrow') || set.has('pass') || set.has('shot')
+      if (t.id === 'shapes') return set.has('shapes') || set.has('line') || set.has('rect') || set.has('circle')
+      if (t.id === 'rinkItems') return set.has('rinkItems') || set.has('goal') || set.has('cone') || set.has('barrier')
+      if (t.id === 'activity')
+        return (
+          set.has('activity') ||
+          set.has('turnRight') ||
+          set.has('turnLeft') ||
+          set.has('uTurnRight') ||
+          set.has('uTurnLeft') ||
+          set.has('dropPass')
+        )
+      return set.has(t.id)
+    })
   }, [allowedToolIds])
 
   const canvasRef = useRef(null)
+  /** Canvas WebGL из R3F — проброс орбиты, когда верхний 2D принимает pointer (линии/пути). */
+  const webglCanvasRef = useRef(null)
+  /** Луч на лёд из 3D-камеры → пиксели холста (только в режиме 3D). */
+  const boardPointerProjectorRef = useRef(null)
   const boardCanvasWrapRef = useRef(null)
   const boardToolbarRef = useRef(null)
   const pencilMenuWrapRef = useRef(null)
+  const passShotMenuWrapRef = useRef(null)
+  const shapesMenuWrapRef = useRef(null)
+  const rinkItemsMenuWrapRef = useRef(null)
+  const activityMenuWrapRef = useRef(null)
   /** Под фиксированную панель (тактическая доска, десктоп): резервируем реальную высоту, в т.ч. при переносе в 2+ ряда */
   const [fixedToolbarSpacerPx, setFixedToolbarSpacerPx] = useState(120)
   const [fitSlotPx, setFitSlotPx] = useState({ w: 0, h: 0 })
@@ -434,13 +598,29 @@ const HockeyBoard = forwardRef(function HockeyBoard(
   const [color, setColor] = useState('#000000')
   useEffect(() => {
     if (readOnly) return
-    if (toolsForToolbar.some((t) => t.id === tool)) return
+    const inToolbar =
+      toolsForToolbar.some((t) => t.id === tool) ||
+      ((tool === 'arrow' || tool === 'pass' || tool === 'shot') &&
+        toolsForToolbar.some((t) => t.id === 'passShot')) ||
+      ((tool === 'line' || tool === 'rect' || tool === 'circle') &&
+        toolsForToolbar.some((t) => t.id === 'shapes')) ||
+      ((tool === 'goal' || tool === 'cone' || tool === 'barrier') &&
+        toolsForToolbar.some((t) => t.id === 'rinkItems')) ||
+      ((tool === 'turnRight' ||
+        tool === 'turnLeft' ||
+        tool === 'uTurnRight' ||
+        tool === 'uTurnLeft' ||
+        tool === 'dropPass') &&
+        toolsForToolbar.some((t) => t.id === 'activity'))
+    if (inToolbar) return
     setTool(toolsForToolbar[0]?.id || 'pen')
   }, [readOnly, toolsForToolbar, tool])
   useEffect(() => {
     if (tool === 'cone' || tool === 'barrier') setColor('#dc2626')
   }, [tool])
   const [strokeWidth, setStrokeWidth] = useState(3)
+  /** Расстояние камеры 3D до центра катка (ползунок справа в режиме 3D). */
+  const [rink3dOrbitDistance, setRink3dOrbitDistance] = useState(RINK3D_ORBIT_DEFAULT_DIST)
   const [isDrawing, setIsDrawing] = useState(false)
   const isDrawingRef = useRef(false)
   useEffect(() => {
@@ -459,6 +639,10 @@ const HockeyBoard = forwardRef(function HockeyBoard(
   const [numberMenuOpen, setNumberMenuOpen] = useState(false)
   const [penMenuOpen, setPenMenuOpen] = useState(false)
   const [pencilMenuOpen, setPencilMenuOpen] = useState(false)
+  const [passShotMenuOpen, setPassShotMenuOpen] = useState(false)
+  const [shapesMenuOpen, setShapesMenuOpen] = useState(false)
+  const [rinkItemsMenuOpen, setRinkItemsMenuOpen] = useState(false)
+  const [activityMenuOpen, setActivityMenuOpen] = useState(false)
   const [numberDigit, setNumberDigit] = useState(1)
   const [autoIndexByIconType, setAutoIndexByIconType] = useState(() => ({ ...DEFAULT_AUTO_INDEX_BY_ICON_TYPE }))
   const [penArrowEnd, setPenArrowEnd] = useState(false)
@@ -627,11 +811,59 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     }
   }, [pencilMenuOpen])
 
+  useEffect(() => {
+    if (!passShotMenuOpen) return
+    const close = (e) => {
+      if (!passShotMenuWrapRef.current?.contains(e.target)) setPassShotMenuOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', close)
+    }
+  }, [passShotMenuOpen])
+
+  useEffect(() => {
+    if (!shapesMenuOpen) return
+    const close = (e) => {
+      if (!shapesMenuWrapRef.current?.contains(e.target)) setShapesMenuOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', close)
+    }
+  }, [shapesMenuOpen])
+
+  useEffect(() => {
+    if (!rinkItemsMenuOpen) return
+    const close = (e) => {
+      if (!rinkItemsMenuWrapRef.current?.contains(e.target)) setRinkItemsMenuOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', close)
+    }
+  }, [rinkItemsMenuOpen])
+
+  useEffect(() => {
+    if (!activityMenuOpen) return
+    const close = (e) => {
+      if (!activityMenuWrapRef.current?.contains(e.target)) setActivityMenuOpen(false)
+    }
+    const t = setTimeout(() => document.addEventListener('click', close), 0)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('click', close)
+    }
+  }, [activityMenuOpen])
+
   const showMobileCollapsedToolbar =
     isMobileToolbar && !alwaysShowFullMobileToolbar && !mobileToolsOpen && !mobileShellLayout
 
   useLayoutEffect(() => {
-    if (!fitCanvasToContainer || readOnly || isMobileToolbar) {
+    if (!reserveFixedToolbarPadding || !fitCanvasToContainer || readOnly || isMobileToolbar) {
       setFixedToolbarSpacerPx(0)
       return
     }
@@ -644,7 +876,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     ro.observe(el)
     update()
     return () => ro.disconnect()
-  }, [fitCanvasToContainer, readOnly, isMobileToolbar, mobileToolsOpen])
+  }, [reserveFixedToolbarPadding, fitCanvasToContainer, readOnly, isMobileToolbar, mobileToolsOpen])
 
   useLayoutEffect(() => {
     if (!fitCanvasToContainer) {
@@ -653,20 +885,48 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     }
     const el = boardCanvasWrapRef.current
     if (!el) return
+    const measureSlot = () => {
+      let w = Math.max(0, el.clientWidth)
+      let h = Math.max(0, el.clientHeight)
+      const natural =
+        w > 0 && canvasW > 0 ? (canvasH * w) / canvasW : 0
+      /* План / flex: пока h≈0 или сильно меньше ожидаемой высоты по aspect — подставляем высоту от ширины */
+      if (w > 0 && canvasW > 0 && (h < 1 || (natural > 0 && h < Math.max(48, natural * 0.45)))) {
+        h = Math.min(Math.max(Math.round(natural), 260), Math.floor(window.innerHeight * 0.78))
+      }
+      return { w, h }
+    }
     const update = () => {
-      const w = Math.max(0, el.clientWidth)
-      const h = Math.max(0, el.clientHeight)
+      const { w, h } = measureSlot()
       setFitSlotPx((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
     }
     const ro = new ResizeObserver(update)
     ro.observe(el)
     update()
+    requestAnimationFrame(() => {
+      update()
+      requestAnimationFrame(update)
+    })
     window.addEventListener('resize', update)
     return () => {
       ro.disconnect()
       window.removeEventListener('resize', update)
     }
-  }, [fitCanvasToContainer])
+  }, [fitCanvasToContainer, canvasW, canvasH])
+
+  /** После 3D→2D меняется ветка DOM с canvas; ResizeObserver иногда не шлёт событие — принудительно меряем слот. */
+  useLayoutEffect(() => {
+    if (!fitCanvasToContainer || boardViewMode !== '2d') return
+    const el = boardCanvasWrapRef.current
+    if (!el) return
+    let w = Math.max(0, el.clientWidth)
+    let h = Math.max(0, el.clientHeight)
+    const natural = w > 0 && canvasW > 0 ? (canvasH * w) / canvasW : 0
+    if (w > 0 && canvasW > 0 && (h < 1 || (natural > 0 && h < Math.max(48, natural * 0.45)))) {
+      h = Math.min(Math.max(Math.round(natural), 260), Math.floor(window.innerHeight * 0.78))
+    }
+    setFitSlotPx((prev) => (prev.w === w && prev.h === h ? prev : { w, h }))
+  }, [fitCanvasToContainer, boardViewMode, canvasW, canvasH])
 
   /**
    * Масштаб при fitCanvasToContainer: строгий contain в слоте (clientWidth/Height у .board-canvas-wrap —
@@ -684,18 +944,36 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     let w = canvasW * s0
     let h = canvasH * s0
     const maxDim = Math.max(w, h)
-    if (maxDim > FIT_DISPLAY_SHRINK_PX) {
-      const k = (maxDim - FIT_DISPLAY_SHRINK_PX) / maxDim
+    const shrinkPx = fitDisplayShrinkPx ?? FIT_DISPLAY_SHRINK_PX
+    /* В 3D не сжимаем поле — крупнее вид и тот же rect у WebGL и hit-слоя. */
+    if (boardViewMode !== '3d' && maxDim > shrinkPx) {
+      const k = (maxDim - shrinkPx) / maxDim
       w *= k
       h *= k
     }
     return { w, h, shellRotatedLayout: shell }
-  }, [fitCanvasToContainer, fitSlotPx.w, fitSlotPx.h, canvasW, canvasH, isMobileShellPortraitRotate])
+  }, [
+    fitCanvasToContainer,
+    fitSlotPx.w,
+    fitSlotPx.h,
+    canvasW,
+    canvasH,
+    isMobileShellPortraitRotate,
+    boardViewMode,
+    fitDisplayShrinkPx
+  ])
 
   const fitDisplaySizeRef = useRef(fitDisplaySize)
   useLayoutEffect(() => {
     fitDisplaySizeRef.current = fitDisplaySize
   }, [fitDisplaySize])
+
+  useEffect(() => {
+    if (boardViewMode !== '3d') {
+      webglCanvasRef.current = null
+      onWebGLCanvasReadyProp?.(null)
+    }
+  }, [boardViewMode, onWebGLCanvasReadyProp])
 
   /** Колесо над canvas: прокрутка ближайшего overflow:auto / страницы (listener не passive — иначе preventDefault бессилен). */
   useEffect(() => {
@@ -740,6 +1018,10 @@ const HockeyBoard = forwardRef(function HockeyBoard(
   const redoRef = useRef([])
   const hasPushedForDragRef = useRef(false)
   const selectMouseDownRef = useRef(null)
+  /** После синтетического mousedown с 3D-иконки: нужно ли включить Rink3DDragLayer (как в 2D после выбора). */
+  const lastMouseDownStarted3dDragRef = useRef(false)
+  /** Стабильная ссылка для cloneElement(threeDContent): обработчик всегда актуальный. */
+  const handleIcon3DPointerDownRef = useRef(() => {})
   const pendingSelectRef = useRef(null)
   const pathsRef = useRef(paths)
   const iconsRef = useRef(icons)
@@ -758,8 +1040,12 @@ const HockeyBoard = forwardRef(function HockeyBoard(
   const [redoable, setRedoable] = useState(false)
   const [extendingEndpoint, setExtendingEndpoint] = useState(null)
   const lastExtendPointRef = useRef(null)
-  const [rotatingGoalIdx, setRotatingGoalIdx] = useState(null)
-  const goalRotationStartRef = useRef({ angle: 0, cursorAngle: 0 })
+  /** Индекс иконки при перетаскивании угла с ручки (в 3D поворот — ползунком в панели). */
+  const [rotatingIconAngleIdx, setRotatingIconAngleIdx] = useState(null)
+  useEffect(() => {
+    if (boardViewMode === '3d') setRotatingIconAngleIdx(null)
+  }, [boardViewMode])
+  const iconAngleRotationStartRef = useRef({ angle: 0, cursorAngle: 0 })
   const teamLogoImgRef = useRef(null)
   /** У тач-устройств в pointermove часто e.buttons === 0 — держим активный pointer после setPointerCapture */
   const activePointerIdRef = useRef(null)
@@ -845,6 +1131,13 @@ const HockeyBoard = forwardRef(function HockeyBoard(
 
   const getCanvasCoords = useCallback(
     (e) => {
+      const proj = boardPointerProjectorRef.current
+      if (boardViewMode === '3d' && proj) {
+        const cx = e.clientX ?? e.touches?.[0]?.clientX ?? e.changedTouches?.[0]?.clientX ?? 0
+        const cy = e.clientY ?? e.touches?.[0]?.clientY ?? e.changedTouches?.[0]?.clientY ?? 0
+        const p = proj(cx, cy)
+        if (p != null) return p
+      }
       const canvas = canvasRef.current
       if (!canvas) return { x: 0, y: 0 }
       const cx = e.clientX ?? e.touches?.[0]?.clientX ?? e.changedTouches?.[0]?.clientX ?? 0
@@ -872,7 +1165,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       const bufY = (cy - rect.top) * scaleY
       return { x: bufX, y: bufY }
     },
-    []
+    [boardViewMode]
   )
 
   const notifyChange = useCallback((newPaths, newIcons) => {
@@ -921,16 +1214,40 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       pushUndo()
       const useAutoIndex = autoIdx[placementTool] !== false
       const nextNum = useAutoIndex ? nextSequentialIndexForIconType(iconsNow, placementTool) : ''
-      notifyChange(pathsNow, [...iconsNow, { id: newEntityId(), type: placementTool, x: c.x, y: c.y, color: col, num: nextNum }])
+      notifyChange(pathsNow, [...iconsNow, { id: newEntityId(), type: placementTool, x: c.x, y: c.y, color: col, num: nextNum, angle: 0 }])
       return
     }
-    if (placementTool === 'player' || placementTool === 'playerTriangle' || placementTool === 'coach' || placementTool === 'goalkeeper' || placementTool === 'puck' || placementTool === 'puckCluster' || placementTool === 'goal' || placementTool === 'cone' || placementTool === 'barrier') {
+    if (
+      placementTool === 'player' ||
+      placementTool === 'playerTriangle' ||
+      placementTool === 'coach' ||
+      placementTool === 'goalkeeper' ||
+      placementTool === 'puck' ||
+      placementTool === 'puckCluster' ||
+      placementTool === 'goal' ||
+      placementTool === 'cone' ||
+      placementTool === 'barrier' ||
+      placementTool === 'turnRight' ||
+      placementTool === 'turnLeft' ||
+      placementTool === 'uTurnRight' ||
+      placementTool === 'uTurnLeft' ||
+      placementTool === 'dropPass'
+    ) {
       pushUndo()
       const playerTypes = ['player', 'playerTriangle']
       const nextNum = playerTypes.includes(placementTool)
         ? (autoIdx[placementTool] !== false ? nextSequentialIndexForIconType(iconsNow, placementTool) : '')
         : undefined
-      const iconColor = (placementTool === 'cone' || placementTool === 'barrier') ? (col || '#dc2626') : col
+      const iconColor =
+        placementTool === 'cone' || placementTool === 'barrier'
+          ? col || '#dc2626'
+          : placementTool === 'turnRight' ||
+              placementTool === 'turnLeft' ||
+              placementTool === 'uTurnRight' ||
+              placementTool === 'uTurnLeft' ||
+              placementTool === 'dropPass'
+            ? col || '#000000'
+            : col
       const newIcon = {
         id: newEntityId(),
         type: placementTool,
@@ -938,7 +1255,21 @@ const HockeyBoard = forwardRef(function HockeyBoard(
         y: c.y,
         color: iconColor,
         num: nextNum,
-        ...(placementTool === 'goal' && { angle: 0 })
+        ...(([
+          'goal',
+          'barrier',
+          'player',
+          'playerTriangle',
+          'coach',
+          'goalkeeper',
+          'turnRight',
+          'turnLeft',
+          'uTurnRight',
+          'uTurnLeft',
+          'dropPass'
+        ].includes(placementTool)) && {
+          angle: 0
+        })
       }
       notifyChange(pathsNow, [...iconsNow, newIcon])
       return
@@ -1063,6 +1394,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       } else if (fieldZone === 'blueToBlue' && drawCustomZone(imgBlueToBlue)) {
         /* drawn */
       } else if (fieldZone === 'full' && img.complete && img.naturalWidth) {
+        /* Растяжение на весь холст сохраняет координаты досок (u,v); 3D-лёд — NHL 200×85 через RINK_DEFAULT_DIMS. */
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
       } else if (['halfAttack', 'halfDefense'].includes(fieldZone)) {
         ctx.fillStyle = '#e8f4fc'
@@ -1259,26 +1591,42 @@ const HockeyBoard = forwardRef(function HockeyBoard(
         } else if (p.type === 'line' || p.type === 'arrow' || p.type === 'dashedArrow' || p.type === 'doubleArrow') {
           if (p.type === 'dashedArrow') ctx.setLineDash([8, 5])
           if (p.type === 'doubleArrow') {
+            /* Бросок: контур как «полый» указатель — белая заливка + тёмная обводка, не сливается с линиями площадки */
             const angle = Math.atan2(p.y2 - p.y1, p.x2 - p.x1)
             const perpX = -Math.sin(angle)
             const perpY = Math.cos(angle)
-            const offset = 4
+            const shaftHalf = 4
+            const headHalf = 7
             const headLen = 14
             const baseX = p.x2 - headLen * Math.cos(angle)
             const baseY = p.y2 - headLen * Math.sin(angle)
+            const a1x = p.x1 - perpX * shaftHalf
+            const a1y = p.y1 - perpY * shaftHalf
+            const n1x = baseX - perpX * shaftHalf
+            const n1y = baseY - perpY * shaftHalf
+            const n2x = baseX + perpX * shaftHalf
+            const n2y = baseY + perpY * shaftHalf
+            const w1x = baseX - perpX * headHalf
+            const w1y = baseY - perpY * headHalf
+            const w2x = baseX + perpX * headHalf
+            const w2y = baseY + perpY * headHalf
+            const a2x = p.x1 + perpX * shaftHalf
+            const a2y = p.y1 + perpY * shaftHalf
             ctx.beginPath()
-            ctx.moveTo(p.x1 - perpX * offset, p.y1 - perpY * offset)
-            ctx.lineTo(baseX - perpX * offset, baseY - perpY * offset)
-            ctx.stroke()
-            ctx.beginPath()
-            ctx.moveTo(p.x1 + perpX * offset, p.y1 + perpY * offset)
-            ctx.lineTo(baseX + perpX * offset, baseY + perpY * offset)
-            ctx.stroke()
-            ctx.beginPath()
-            ctx.moveTo(p.x2, p.y2)
-            ctx.lineTo(baseX - perpX * offset, baseY - perpY * offset)
-            ctx.moveTo(p.x2, p.y2)
-            ctx.lineTo(baseX + perpX * offset, baseY + perpY * offset)
+            ctx.moveTo(a1x, a1y)
+            ctx.lineTo(n1x, n1y)
+            ctx.lineTo(w1x, w1y)
+            ctx.lineTo(p.x2, p.y2)
+            ctx.lineTo(w2x, w2y)
+            ctx.lineTo(n2x, n2y)
+            ctx.lineTo(a2x, a2y)
+            ctx.closePath()
+            ctx.fillStyle = '#ffffff'
+            ctx.fill()
+            ctx.strokeStyle = selP.includes(pIdx) ? '#9333ea' : '#000000'
+            ctx.lineWidth = selP.includes(pIdx) ? (p.width || 2) + 1 : Math.max(2, (p.width || 2))
+            ctx.lineJoin = 'miter'
+            ctx.lineCap = 'butt'
             ctx.stroke()
           } else {
             ctx.beginPath()
@@ -1501,6 +1849,48 @@ const HockeyBoard = forwardRef(function HockeyBoard(
           ctx.moveTo(ic.x + w, ic.y - h)
           ctx.lineTo(ic.x + w, ic.y + h)
           ctx.stroke()
+        } else if (ic.type === 'turnRight' || ic.type === 'turnLeft') {
+          drawActivityTurnIcon2D(ctx, ic, shellIconScale, iconColor)
+          if (selI.includes(idx)) {
+            const tr = BOARD_ACTIVITY_TURN_ICON_R_PX * shellIconScale
+            const handle = getGoalRotationHandlePos(ic, tr)
+            const handleR = Math.max(6, Math.round(6 * shellIconScale))
+            ctx.fillStyle = '#9333ea'
+            ctx.strokeStyle = '#fff'
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(handle.x, handle.y, handleR, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
+        } else if (ic.type === 'uTurnRight' || ic.type === 'uTurnLeft') {
+          drawActivityUTurnIcon2D(ctx, ic, shellIconScale, iconColor)
+          if (selI.includes(idx)) {
+            const tr = BOARD_ACTIVITY_TURN_ICON_R_PX * shellIconScale
+            const handle = getGoalRotationHandlePos(ic, tr)
+            const handleR = Math.max(6, Math.round(6 * shellIconScale))
+            ctx.fillStyle = '#9333ea'
+            ctx.strokeStyle = '#fff'
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(handle.x, handle.y, handleR, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
+        } else if (ic.type === 'dropPass') {
+          drawActivityDropPassIcon2D(ctx, ic, shellIconScale, iconColor)
+          if (selI.includes(idx)) {
+            const tr = BOARD_ACTIVITY_TURN_ICON_R_PX * shellIconScale
+            const handle = getGoalRotationHandlePos(ic, tr)
+            const handleR = Math.max(6, Math.round(6 * shellIconScale))
+            ctx.fillStyle = '#9333ea'
+            ctx.strokeStyle = '#fff'
+            ctx.lineWidth = 2
+            ctx.beginPath()
+            ctx.arc(handle.x, handle.y, handleR, 0, Math.PI * 2)
+            ctx.fill()
+            ctx.stroke()
+          }
         } else if (ic.type === 'goal') {
           const r = GOAL_ICON_R * shellIconScale
           const angle = ((ic.angle || 0) * Math.PI) / 180
@@ -1586,7 +1976,8 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     pngExportAllLayers,
     activeLayerId,
     isMobileShellPortraitRotate,
-    shellIconScale
+    shellIconScale,
+    boardViewMode
   ])
 
   const handlePointerDown = (e) => {
@@ -1621,6 +2012,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
   }
 
   const handleMouseDown = (e) => {
+    lastMouseDownStarted3dDragRef.current = false
     if ((e.pointerType ?? 'mouse') !== 'touch') {
       e.preventDefault()
     } else if (isMobileToolbar) {
@@ -1643,7 +2035,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
 
     if (tool === 'select' && selectedIcons.length === 1) {
       const ic = icons[selectedIcons[0]]
-      if (ic?.type === 'goal') {
+      if (ic?.type === 'goal' && boardViewMode !== '3d') {
         const gR = GOAL_ICON_R * shellIconScale
         const onGoalBody = hitTestGoalIcon(ic, coords.x, coords.y, gR)
         const handle = getGoalRotationHandlePos(ic, gR)
@@ -1651,8 +2043,29 @@ const HockeyBoard = forwardRef(function HockeyBoard(
         if (onHandle && !onGoalBody) {
           pushUndo()
           const cursorAngle = Math.atan2(coords.y - ic.y, coords.x - ic.x)
-          goalRotationStartRef.current = { angle: ic.angle || 0, cursorAngle }
-          setRotatingGoalIdx(selectedIcons[0])
+          iconAngleRotationStartRef.current = { angle: ic.angle || 0, cursorAngle }
+          setRotatingIconAngleIdx(selectedIcons[0])
+          if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
+          return
+        }
+      }
+      if (
+        boardViewMode !== '3d' &&
+        (ic?.type === 'turnRight' ||
+        ic?.type === 'turnLeft' ||
+        ic?.type === 'uTurnRight' ||
+        ic?.type === 'uTurnLeft' ||
+        ic?.type === 'dropPass')
+      ) {
+        const tr = BOARD_ACTIVITY_TURN_ICON_R_PX * shellIconScale
+        const onTurnBody = Math.hypot(coords.x - ic.x, coords.y - ic.y) < 16 * shellIconScale
+        const handle = getGoalRotationHandlePos(ic, tr)
+        const onHandle = Math.hypot(coords.x - handle.x, coords.y - handle.y) < 12 * shellIconScale
+        if (onHandle && !onTurnBody) {
+          pushUndo()
+          const cursorAngle = Math.atan2(coords.y - ic.y, coords.x - ic.x)
+          iconAngleRotationStartRef.current = { angle: ic.angle || 0, cursorAngle }
+          setRotatingIconAngleIdx(selectedIcons[0])
           if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
           return
         }
@@ -1740,6 +2153,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
             setDragOffset({ x: coords.x - icons[iconIdx].x, y: coords.y - icons[iconIdx].y })
             selectMouseDownRef.current = coords
             hasPushedForDragRef.current = false
+            lastMouseDownStarted3dDragRef.current = true
             return
           }
           if (pathIdx >= 0) {
@@ -1882,6 +2296,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       setDragOffset({ x: coords.x - icons[hitIcon].x, y: coords.y - icons[hitIcon].y })
       selectMouseDownRef.current = coords
       hasPushedForDragRef.current = false
+      lastMouseDownStarted3dDragRef.current = true
       if (e.pointerType === 'touch') touchCaptureAfterDownRef.current = true
       return
     }
@@ -1900,6 +2315,56 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       return
     }
 
+    /* 3D: пустой клик при «свободной» орбите — отдать жест WebGL (иначе с pointer-events:auto на 2D орбита не получает события). */
+    if (
+      boardViewMode === '3d' &&
+      threeDContent &&
+      tool === 'select' &&
+      selectedIcons.length === 0 &&
+      selectedPaths.length === 0 &&
+      selectionBox == null &&
+      extendingEndpoint == null &&
+      rotatingIconAngleIdx == null
+    ) {
+      const webgl = webglCanvasRef.current
+      const canvas2d = canvasRef.current
+      if (webgl && canvas2d) {
+        try {
+          if (canvas2d.hasPointerCapture?.(e.pointerId)) {
+            canvas2d.releasePointerCapture(e.pointerId)
+          }
+        } catch (_) {
+          /* ignore */
+        }
+        activePointerIdRef.current = null
+        canvas2d.style.pointerEvents = 'none'
+        const restore = () => {
+          canvas2d.style.pointerEvents = 'auto'
+          document.removeEventListener('pointerup', restore)
+          document.removeEventListener('pointercancel', restore)
+        }
+        document.addEventListener('pointerup', restore)
+        document.addEventListener('pointercancel', restore)
+        webgl.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            bubbles: true,
+            cancelable: true,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            pointerId: e.pointerId,
+            pointerType: e.pointerType,
+            button: e.button,
+            buttons: e.buttons,
+            isPrimary: e.isPrimary,
+            pressure: e.pressure,
+            width: e.width,
+            height: e.height
+          })
+        )
+        return
+      }
+    }
+
     setSelectedPaths([])
     setSelectedIcons([])
     setSelectionBox({ start: coords, current: coords })
@@ -1914,7 +2379,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
         selectedPaths.length > 0 ||
         extendingEndpoint ||
         selectionBox ||
-        rotatingGoalIdx !== null
+        rotatingIconAngleIdx !== null
       if (needsCapture) {
         try {
           canvasRef.current.setPointerCapture(e.pointerId)
@@ -1928,7 +2393,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       selectedIcons.length > 0 ||
       selectedPaths.length > 0 ||
       extendingEndpoint ||
-      rotatingGoalIdx !== null ||
+      rotatingIconAngleIdx !== null ||
       selectionBox
     if (blockScrollGesture) e.preventDefault()
     const coords = getCanvasCoords(e)
@@ -1958,20 +2423,31 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       }
     }
 
-    if (rotatingGoalIdx !== null && isPrimaryHeld(e)) {
-      const ic = icons[rotatingGoalIdx]
-      if (ic?.type === 'goal') {
-        const { angle: startAngle, cursorAngle: startCursorAngle } = goalRotationStartRef.current
+    if (rotatingIconAngleIdx !== null && isPrimaryHeld(e)) {
+      if (boardViewMode === '3d') return
+      const ic = icons[rotatingIconAngleIdx]
+      if (
+        ic?.type === 'goal' ||
+        ic?.type === 'barrier' ||
+        ic?.type === 'turnRight' ||
+        ic?.type === 'turnLeft' ||
+        ic?.type === 'uTurnRight' ||
+        ic?.type === 'uTurnLeft' ||
+        ic?.type === 'dropPass' ||
+        isRotatablePersonIconType(ic.type)
+      ) {
+        const { angle: startAngle, cursorAngle: startCursorAngle } = iconAngleRotationStartRef.current
         const cursorAngleRad = Math.atan2(coords.y - ic.y, coords.x - ic.x)
+        /* Как на 2D-холсте с ctx.rotate(-angle): минус на дельте, чтобы ворота следовали за курсором. */
         let delta = -(cursorAngleRad - startCursorAngle) * (180 / Math.PI)
         if (delta > 180) delta -= 360
         if (delta < -180) delta += 360
         let newAngle = startAngle + delta
         if (newAngle >= 360) newAngle -= 360
         if (newAngle < 0) newAngle += 360
-        goalRotationStartRef.current = { angle: newAngle, cursorAngle: cursorAngleRad }
+        iconAngleRotationStartRef.current = { angle: newAngle, cursorAngle: cursorAngleRad }
         const next = icons.map((item, i) =>
-          i === rotatingGoalIdx ? { ...item, angle: newAngle } : item
+          i === rotatingIconAngleIdx ? { ...item, angle: newAngle } : item
         )
         notifyChange(paths, next)
       }
@@ -2123,8 +2599,8 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       return
     }
 
-    if (rotatingGoalIdx !== null) {
-      setRotatingGoalIdx(null)
+    if (rotatingIconAngleIdx !== null) {
+      setRotatingIconAngleIdx(null)
       return
     }
     if (selectionBox) {
@@ -2350,6 +2826,10 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     setWaveMenuOpen(false)
     setNumberMenuOpen(false)
     setPenMenuOpen(false)
+    setPassShotMenuOpen(false)
+    setShapesMenuOpen(false)
+    setRinkItemsMenuOpen(false)
+    setActivityMenuOpen(false)
     if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
   }
 
@@ -2359,6 +2839,10 @@ const HockeyBoard = forwardRef(function HockeyBoard(
     setNumberMenuOpen(false)
     setWaveMenuOpen(false)
     setPenMenuOpen(false)
+    setPassShotMenuOpen(false)
+    setShapesMenuOpen(false)
+    setRinkItemsMenuOpen(false)
+    setActivityMenuOpen(false)
     if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
   }
 
@@ -2454,6 +2938,10 @@ const HockeyBoard = forwardRef(function HockeyBoard(
             onClick={() => {
               setWaveMenuOpen(false)
               setNumberMenuOpen(false)
+              setPassShotMenuOpen(false)
+              setShapesMenuOpen(false)
+              setRinkItemsMenuOpen(false)
+              setActivityMenuOpen(false)
               setTool('pen')
               setPenMenuOpen((v) => !v)
             }}
@@ -2480,25 +2968,36 @@ const HockeyBoard = forwardRef(function HockeyBoard(
         <div key={t.id} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
-            className={`tool-btn ${tool === t.id ? 'active' : ''}`}
+            className={`tool-btn tool-btn--curve ${tool === t.id ? 'active' : ''}`}
             onClick={() => {
               setNumberMenuOpen(false)
               setPenMenuOpen(false)
+              setPassShotMenuOpen(false)
+              setShapesMenuOpen(false)
+              setRinkItemsMenuOpen(false)
+              setActivityMenuOpen(false)
               setWaveMenuOpen((v) => !v)
             }}
             title={t.label}
+            aria-expanded={waveMenuOpen}
+            aria-haspopup="menu"
           >
             {Icon && <Icon />}
+            <ChevronDown size={14} strokeWidth={2} className={`tool-btn-pen-chevron${waveMenuOpen ? ' open' : ''}`} aria-hidden />
           </button>
           {waveMenuOpen && (
-            <div className="wave-style-dropdown wave-tool-menu">
-              <div className="wave-menu">
-                {WAVE_STYLES.map((s) => (
-                  <button key={s.id} type="button" className={waveStyle === s.id ? 'active' : ''} onClick={() => selectCurveWithStyle(s.id)}>
-                    {s.label}
-                  </button>
-                ))}
-                <label className="wave-direction-check">
+            <div className="wave-style-dropdown wave-tool-menu wave-tool-menu--curve" role="menu" aria-label={t.label}>
+              <div className="wave-menu wave-menu--vertical-toolbar wave-menu-curve" lang="ru">
+                {WAVE_STYLES.map((s) => {
+                  const WaveIcon = WAVE_MOVEMENT_ICONS[s.id]
+                  return (
+                    <button key={s.id} type="button" className={waveStyle === s.id ? 'active' : ''} onClick={() => selectCurveWithStyle(s.id)} title={s.label}>
+                      {WaveIcon && <WaveIcon />}
+                      <span className="toolbar-submenu-label">{s.label}</span>
+                    </button>
+                  )
+                })}
+                <label className="wave-direction-check wave-direction-check--curve-toolbar">
                   <input type="checkbox" checked={waveDirection} onChange={(e) => setWaveDirection(e.target.checked)} />
                   <span>Направление (стрелка)</span>
                 </label>
@@ -2517,6 +3016,10 @@ const HockeyBoard = forwardRef(function HockeyBoard(
             onClick={() => {
               setWaveMenuOpen(false)
               setPenMenuOpen(false)
+              setPassShotMenuOpen(false)
+              setShapesMenuOpen(false)
+              setRinkItemsMenuOpen(false)
+              setActivityMenuOpen(false)
               setTool('numbers')
               setNumberMenuOpen((v) => !v)
             }}
@@ -2539,6 +3042,404 @@ const HockeyBoard = forwardRef(function HockeyBoard(
         </div>
       )
     }
+    if (t.id === 'passShot') {
+      const ArrowIconComp = toolIcons.arrow
+      const PassIconComp = toolIcons.pass
+      const ShotIconComp = toolIcons.shot
+      const isArrowPassShot = tool === 'arrow' || tool === 'pass' || tool === 'shot'
+      const MainIcon =
+        tool === 'shot' ? ShotIconComp : tool === 'pass' ? PassIconComp : ArrowIconComp
+      const passShotMainTitle =
+        tool === 'shot'
+          ? 'Бросок'
+          : tool === 'pass'
+            ? 'Передача'
+            : tool === 'arrow'
+              ? 'Бег лицом вперед'
+              : t.label
+      return (
+        <div key={t.id} ref={passShotMenuWrapRef} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`tool-btn tool-btn--pass-shot ${isArrowPassShot ? 'active' : ''}`}
+            onClick={() => {
+              setWaveMenuOpen(false)
+              setNumberMenuOpen(false)
+              setPenMenuOpen(false)
+              setShapesMenuOpen(false)
+              setRinkItemsMenuOpen(false)
+              setActivityMenuOpen(false)
+              if (!isArrowPassShot) setTool('arrow')
+              setPassShotMenuOpen((v) => !v)
+              if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+            }}
+            title={passShotMainTitle}
+            aria-expanded={passShotMenuOpen}
+            aria-haspopup="menu"
+          >
+            {MainIcon && <MainIcon />}
+            <ChevronDown size={14} strokeWidth={2} className={`tool-btn-pen-chevron${passShotMenuOpen ? ' open' : ''}`} aria-hidden />
+          </button>
+          {passShotMenuOpen && (
+            <div className="wave-style-dropdown wave-tool-menu pass-shot-tool-menu" role="menu" aria-label="Бег, передача или бросок">
+              <div className="wave-menu wave-menu--vertical-toolbar pass-shot-menu" lang="ru">
+                <button
+                  type="button"
+                  className={tool === 'arrow' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('arrow')
+                    setShapesMenuOpen(false)
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    setPassShotMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Бег лицом вперед"
+                >
+                  {ArrowIconComp && <ArrowIconComp />}
+                  <span className="toolbar-submenu-label">Бег лицом вперед</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'pass' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('pass')
+                    setShapesMenuOpen(false)
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    setPassShotMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Передача"
+                >
+                  {PassIconComp && <PassIconComp />}
+                  <span className="toolbar-submenu-label">Передача</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'shot' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('shot')
+                    setShapesMenuOpen(false)
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    setPassShotMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Бросок"
+                >
+                  {ShotIconComp && <ShotIconComp />}
+                  <span className="toolbar-submenu-label">Бросок</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (t.id === 'shapes') {
+      const LineIconComp = toolIcons.line
+      const RectIconComp = toolIcons.rect
+      const CircleIconComp = toolIcons.circle
+      const isShapesTool = tool === 'line' || tool === 'rect' || tool === 'circle'
+      const MainIcon =
+        tool === 'circle' ? CircleIconComp : tool === 'rect' ? RectIconComp : LineIconComp
+      const shapesMainTitle =
+        tool === 'circle'
+          ? 'Круг'
+          : tool === 'rect'
+            ? 'Прямоугольник'
+            : tool === 'line'
+              ? 'Линия'
+              : t.label
+      return (
+        <div key={t.id} ref={shapesMenuWrapRef} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`tool-btn tool-btn--shapes ${isShapesTool ? 'active' : ''}`}
+            onClick={() => {
+              setWaveMenuOpen(false)
+              setNumberMenuOpen(false)
+              setPenMenuOpen(false)
+              setPassShotMenuOpen(false)
+              setRinkItemsMenuOpen(false)
+              setActivityMenuOpen(false)
+              if (!isShapesTool) setTool('line')
+              setShapesMenuOpen((v) => !v)
+              if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+            }}
+            title={shapesMainTitle}
+            aria-expanded={shapesMenuOpen}
+            aria-haspopup="menu"
+          >
+            {MainIcon && <MainIcon />}
+            <ChevronDown size={14} strokeWidth={2} className={`tool-btn-pen-chevron${shapesMenuOpen ? ' open' : ''}`} aria-hidden />
+          </button>
+          {shapesMenuOpen && (
+            <div className="wave-style-dropdown wave-tool-menu shapes-tool-menu" role="menu" aria-label="Линия, прямоугольник или круг">
+              <div className="wave-menu wave-menu--vertical-toolbar shapes-menu" lang="ru">
+                <button
+                  type="button"
+                  className={tool === 'line' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('line')
+                    setShapesMenuOpen(false)
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Линия"
+                >
+                  {LineIconComp && <LineIconComp />}
+                  <span className="toolbar-submenu-label">Линия</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'rect' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('rect')
+                    setShapesMenuOpen(false)
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Прямоугольник"
+                >
+                  {RectIconComp && <RectIconComp />}
+                  <span className="toolbar-submenu-label">Прямоугольник</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'circle' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('circle')
+                    setShapesMenuOpen(false)
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Круг"
+                >
+                  {CircleIconComp && <CircleIconComp />}
+                  <span className="toolbar-submenu-label">Круг</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (t.id === 'rinkItems') {
+      const GoalIconComp = toolIcons.goal
+      const ConeIconComp = toolIcons.cone
+      const BarrierIconComp = toolIcons.barrier
+      const isRinkItemsTool = tool === 'goal' || tool === 'cone' || tool === 'barrier'
+      const MainIcon =
+        tool === 'cone' ? ConeIconComp : tool === 'barrier' ? BarrierIconComp : GoalIconComp
+      const rinkItemsMainTitle =
+        tool === 'cone'
+          ? 'Конус'
+          : tool === 'barrier'
+            ? 'Барьер'
+            : tool === 'goal'
+              ? 'Ворота'
+              : t.label
+      return (
+        <div key={t.id} ref={rinkItemsMenuWrapRef} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`tool-btn tool-btn--rink-items ${isRinkItemsTool ? 'active' : ''}`}
+            onClick={() => {
+              setWaveMenuOpen(false)
+              setNumberMenuOpen(false)
+              setPenMenuOpen(false)
+              setPassShotMenuOpen(false)
+              setShapesMenuOpen(false)
+              setActivityMenuOpen(false)
+              if (!isRinkItemsTool) setTool('goal')
+              setRinkItemsMenuOpen((v) => !v)
+              if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+            }}
+            title={rinkItemsMainTitle}
+            aria-expanded={rinkItemsMenuOpen}
+            aria-haspopup="menu"
+          >
+            {MainIcon && <MainIcon />}
+            <ChevronDown size={14} strokeWidth={2} className={`tool-btn-pen-chevron${rinkItemsMenuOpen ? ' open' : ''}`} aria-hidden />
+          </button>
+          {rinkItemsMenuOpen && (
+            <div className="wave-style-dropdown wave-tool-menu rink-items-tool-menu" role="menu" aria-label="Ворота, конус или барьер">
+              <div className="wave-menu wave-menu--vertical-toolbar rink-items-menu" lang="ru">
+                <button
+                  type="button"
+                  className={tool === 'goal' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('goal')
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Ворота"
+                >
+                  {GoalIconComp && <GoalIconComp />}
+                  <span className="toolbar-submenu-label">Ворота</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'cone' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('cone')
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Конус"
+                >
+                  {ConeIconComp && <ConeIconComp />}
+                  <span className="toolbar-submenu-label">Конус</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'barrier' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('barrier')
+                    setRinkItemsMenuOpen(false)
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Барьер"
+                >
+                  {BarrierIconComp && <BarrierIconComp />}
+                  <span className="toolbar-submenu-label">Барьер</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
+    if (t.id === 'activity') {
+      const ACTIVITY_IDS = ['turnRight', 'turnLeft', 'uTurnRight', 'uTurnLeft', 'dropPass']
+      const isActivityTool = ACTIVITY_IDS.includes(tool)
+      const MainIconComp = isActivityTool && toolIcons[tool] ? toolIcons[tool] : toolIcons.turnRight
+      const TurnRightIconComp = toolIcons.turnRight
+      const TurnLeftIconComp = toolIcons.turnLeft
+      const UTurnRightIconComp = toolIcons.uTurnRight
+      const UTurnLeftIconComp = toolIcons.uTurnLeft
+      const DropPassIconComp = toolIcons.dropPass
+      const activityMainTitle =
+        tool === 'turnLeft'
+          ? 'Поворот налево'
+          : tool === 'turnRight'
+            ? 'Поворот направо'
+            : tool === 'uTurnLeft'
+              ? 'Разворот налево'
+              : tool === 'uTurnRight'
+                ? 'Разворот направо'
+                : tool === 'dropPass'
+                  ? 'Передача паса'
+                  : t.label
+      return (
+        <div key={t.id} ref={activityMenuWrapRef} className="tool-btn-wrap" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className={`tool-btn tool-btn--activity ${isActivityTool ? 'active' : ''}`}
+            onClick={() => {
+              setWaveMenuOpen(false)
+              setNumberMenuOpen(false)
+              setPenMenuOpen(false)
+              setPassShotMenuOpen(false)
+              setShapesMenuOpen(false)
+              setRinkItemsMenuOpen(false)
+              if (!isActivityTool) setTool('turnRight')
+              setActivityMenuOpen((v) => !v)
+              if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+            }}
+            title={activityMainTitle}
+            aria-expanded={activityMenuOpen}
+            aria-haspopup="menu"
+          >
+            {MainIconComp && <MainIconComp />}
+            <ChevronDown size={14} strokeWidth={2} className={`tool-btn-pen-chevron${activityMenuOpen ? ' open' : ''}`} aria-hidden />
+          </button>
+          {activityMenuOpen && (
+            <div
+              className="wave-style-dropdown wave-tool-menu activity-tool-menu"
+              role="menu"
+              aria-label="Поворот, разворот, передача паса"
+            >
+              <div className="wave-menu wave-menu--vertical-toolbar activity-menu" lang="ru">
+                <button
+                  type="button"
+                  className={tool === 'turnRight' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('turnRight')
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Поворот направо"
+                >
+                  {TurnRightIconComp && <TurnRightIconComp />}
+                  <span className="toolbar-submenu-label">Поворот направо</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'turnLeft' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('turnLeft')
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Поворот налево"
+                >
+                  {TurnLeftIconComp && <TurnLeftIconComp />}
+                  <span className="toolbar-submenu-label">Поворот налево</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'uTurnRight' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('uTurnRight')
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Разворот направо"
+                >
+                  {UTurnRightIconComp && <UTurnRightIconComp />}
+                  <span className="toolbar-submenu-label">Разворот направо</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'uTurnLeft' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('uTurnLeft')
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Разворот налево"
+                >
+                  {UTurnLeftIconComp && <UTurnLeftIconComp />}
+                  <span className="toolbar-submenu-label">Разворот налево</span>
+                </button>
+                <button
+                  type="button"
+                  className={tool === 'dropPass' ? 'active' : ''}
+                  onClick={() => {
+                    setTool('dropPass')
+                    setActivityMenuOpen(false)
+                    if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
+                  }}
+                  title="Передача паса"
+                >
+                  {DropPassIconComp && <DropPassIconComp />}
+                  <span className="toolbar-submenu-label">Передача паса</span>
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    }
     return (
       <button
         key={t.id}
@@ -2549,6 +3450,10 @@ const HockeyBoard = forwardRef(function HockeyBoard(
           setWaveMenuOpen(false)
           setNumberMenuOpen(false)
           setPenMenuOpen(false)
+          setPassShotMenuOpen(false)
+          setShapesMenuOpen(false)
+          setRinkItemsMenuOpen(false)
+          setActivityMenuOpen(false)
           if (mobileShellLayout && isMobileToolbar) setMobileFolderOpen(false)
         }}
         title={t.label}
@@ -2722,9 +3627,140 @@ const HockeyBoard = forwardRef(function HockeyBoard(
   )
 
   const boardRootStyle =
-    fitCanvasToContainer && !isMobileToolbar && !readOnly
+    reserveFixedToolbarPadding && fitCanvasToContainer && !isMobileToolbar && !readOnly
       ? { paddingTop: fixedToolbarSpacerPx }
       : undefined
+
+  /** Клик по мешу иконки в WebGL: те же правила, что и mousedown по холсту в центре иконки (выбор, ластик, двойной клик и т.д.). */
+  handleIcon3DPointerDownRef.current = (iconId, r3fEvent) => {
+    if (readOnly || !onChange) return false
+    const iconIdx = icons.findIndex((ic) => ic.id === iconId)
+    if (iconIdx < 0) return false
+    const ic = icons[iconIdx]
+    const canvas = canvasRef.current
+    if (!canvas) return false
+    const rect = canvas.getBoundingClientRect()
+    const ne = r3fEvent.nativeEvent
+    const fd = fitDisplaySizeRef.current
+    let clientX
+    let clientY
+    if (fd?.shellRotatedLayout && fd.w > 0 && fd.h > 0) {
+      const ccx = rect.left + rect.width / 2
+      const ccy = rect.top + rect.height / 2
+      const lx = ic.x * (fd.w / canvas.width) - fd.w / 2
+      const ly = ic.y * (fd.h / canvas.height) - fd.h / 2
+      const dx = -ly
+      const dy = lx
+      clientX = ccx + dx
+      clientY = ccy + dy
+    } else {
+      const scaleX = canvas.width / rect.width
+      const scaleY = canvas.height / rect.height
+      clientX = rect.left + ic.x / scaleX
+      clientY = rect.top + ic.y / scaleY
+    }
+    const synthetic = {
+      clientX,
+      clientY,
+      shiftKey: !!(r3fEvent.shiftKey ?? ne?.shiftKey),
+      detail: typeof ne?.detail === 'number' ? ne.detail : 0,
+      pointerType: ne?.pointerType ?? 'mouse',
+      pointerId: ne?.pointerId ?? 0,
+      button: typeof ne?.button === 'number' ? ne.button : 0,
+      preventDefault: () => {},
+      currentTarget: canvas
+    }
+    handleMouseDown(synthetic)
+    return lastMouseDownStarted3dDragRef.current
+  }
+
+  /** В 3D: панорама ПКМ только в «Выбор» без выделенных объектов; ЛКМ — вращение орбиты. */
+  const orbitPanEnabled = useMemo(
+    () =>
+      tool === 'select' &&
+      selectedIcons.length === 0 &&
+      selectedPaths.length === 0 &&
+      selectionBox == null &&
+      extendingEndpoint == null &&
+      rotatingIconAngleIdx == null,
+    [tool, selectedIcons.length, selectedPaths.length, selectionBox, extendingEndpoint, rotatingIconAngleIdx]
+  )
+
+  const onWebGLCanvasReadyStable = useCallback(
+    (el) => {
+      webglCanvasRef.current = el
+      onWebGLCanvasReadyProp?.(el)
+    },
+    [onWebGLCanvasReadyProp]
+  )
+
+  const onBoardPointerProjectorReadyStable = useCallback((fn) => {
+    boardPointerProjectorRef.current = fn
+  }, [])
+
+  /** Соответствует обводке 2D (#9333ea): подсветка выделения в 3D. */
+  const selectedIconIdsFor3d = useMemo(
+    () => selectedIcons.map((i) => icons[i]?.id).filter(Boolean),
+    [selectedIcons, icons]
+  )
+  const selectedPathIdsFor3d = useMemo(
+    () => selectedPaths.map((i) => paths[i]?.id).filter(Boolean),
+    [selectedPaths, paths]
+  )
+
+  const show3dRotationToolbar =
+    !readOnly &&
+    onChange &&
+    boardViewMode === '3d' &&
+    tool === 'select' &&
+    selectedIcons.length === 1 &&
+    iconSupports3dToolbarRotation(icons[selectedIcons[0]]?.type)
+
+  const threeDRotationToolbarCluster =
+    show3dRotationToolbar ? (
+      <div className="board-3d-rotation-toolbar-cluster">
+        <span className="board-3d-rotation-toolbar-label">вращение</span>
+        <input
+          type="range"
+          className="board-3d-rotation-slider"
+          min={-180}
+          max={180}
+          step={1}
+          value={storedAngleToSliderSigned(icons[selectedIcons[0]]?.angle)}
+          onPointerDown={() => pushUndo()}
+          onChange={(e) => {
+            const idx = selectedIcons[0]
+            const nextAngle = signedSliderToStoredAngle(e.target.value)
+            notifyChange(
+              paths,
+              icons.map((ic, i) => (i === idx ? { ...ic, angle: nextAngle } : ic))
+            )
+          }}
+          aria-label="Поворот объекта в 3D"
+          title="Поворот"
+        />
+      </div>
+    ) : null
+
+  const augmentedThreeDContent =
+    boardViewMode === '3d' && threeDContent && isValidElement(threeDContent)
+      ? cloneElement(threeDContent, {
+          onIcon3DPointerDown: (iconId, ev) => handleIcon3DPointerDownRef.current(iconId, ev),
+          orbitDistance: rink3dOrbitDistance,
+          orbitEnablePan: orbitPanEnabled,
+          onWebGLCanvasReady: onWebGLCanvasReadyStable,
+          onBoardPointerProjectorReady: onBoardPointerProjectorReadyStable,
+          selectedIconIds: selectedIconIdsFor3d,
+          selectedPathIds: selectedPathIdsFor3d,
+          icon3dAssetBaseUrl,
+          icon3dGlbUrls,
+          hideRotationHandles: true
+        })
+      : threeDContent
+
+  const show3dUnderlay = boardViewMode === '3d' && threeDContent
+  /** В 3D верхний 2D-слой с pointer-events: auto — hit-test линий/путей; пустой клик при орбите пробрасывается на WebGL. */
+  const hitLayerPointerEvents = 'auto'
 
   return (
     <div
@@ -2761,6 +3797,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
                       <Download size={18} strokeWidth={2} />
                     </button>
                   )}
+                  {threeDRotationToolbarCluster}
                 </div>
                 {toolbarRight && <div className="toolbar-right toolbar-right-mobile-summary">{toolbarRight}</div>}
               </div>
@@ -2770,7 +3807,9 @@ const HockeyBoard = forwardRef(function HockeyBoard(
         <div ref={boardToolbarRef} className="board-toolbar">
           {!isMobileToolbar && (
             <p className="board-toolbar-hint board-toolbar-hint--top">
-              Для выбора и перемещения кликните по объекту 2 раза.
+              {boardViewMode === '3d'
+                ? 'ВАЖНО! При работе с 3D иконками они могут загружаться не сразу из-за большого размера. Все зависит от скорости вашего интернета и соединения с сервером. При повторном использовании загрузка иконок будет быстрее'
+                : 'Для выбора и перемещения кликните по объекту 2 раза.'}
             </p>
           )}
           {isMobileToolbar && !alwaysShowFullMobileToolbar && (
@@ -2914,7 +3953,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
                 />
               </div>
             )}
-          {(!useMobileVideoToolbar || canDownloadPng) && (
+          {(!useMobileVideoToolbar || canDownloadPng || show3dRotationToolbar) && (
             <div className={`toolbar-section actions${actionBtnsMobile ? ' toolbar-actions-icons-only' : ''}`}>
               {actionBtnsMobile ? (
                 <>
@@ -2937,6 +3976,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
                       <Download size={18} strokeWidth={2} />
                     </button>
                   )}
+                  {threeDRotationToolbarCluster}
                 </>
               ) : (
                 <>
@@ -2947,6 +3987,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
                   {canDownloadPng && (
                     <button type="button" className="btn-outline" onClick={downloadPng} title={downloadPngTitle}>Скачать PNG</button>
                   )}
+                  {threeDRotationToolbarCluster}
                 </>
               )}
             </div>
@@ -2958,7 +3999,7 @@ const HockeyBoard = forwardRef(function HockeyBoard(
       )}
       <div
         ref={fitCanvasToContainer ? boardCanvasWrapRef : undefined}
-        className={`board-canvas-wrap${fitCanvasToContainer ? ' board-canvas-wrap--fit-slot' : ''}${isMobileShellPortraitRotate ? ' board-canvas-wrap--mobile-shell-rotate' : ''}`}
+        className={`board-canvas-wrap${fitCanvasToContainer ? ' board-canvas-wrap--fit-slot' : ''}${isMobileShellPortraitRotate ? ' board-canvas-wrap--mobile-shell-rotate' : ''}${show3dUnderlay ? ' board-canvas-wrap--with-3d' : ''}`}
         style={{ cursor: 'crosshair' }}
         onContextMenu={(e) => e.preventDefault()}
       >
@@ -2967,11 +4008,31 @@ const HockeyBoard = forwardRef(function HockeyBoard(
             <div
               className="board-canvas-display board-canvas-display--shell-rotated"
               style={{
+                position: 'relative',
                 width: `${fitDisplaySize.h}px`,
                 height: `${fitDisplaySize.w}px`,
                 flexShrink: 0
               }}
             >
+              {show3dUnderlay ? (
+                <div
+                  className="board-shell-3d-layer"
+                  style={{
+                    position: 'absolute',
+                    left: '50%',
+                    top: '50%',
+                    width: `${fitDisplaySize.w}px`,
+                    height: `${fitDisplaySize.h}px`,
+                    transform: 'translate(-50%, -50%) rotate(90deg)',
+                    transformOrigin: 'center center',
+                    zIndex: 0
+                  }}
+                >
+                  <div className="board-3d-underlay board-3d-underlay--in-rotated-slot" style={{ width: '100%', height: '100%' }}>
+                    {augmentedThreeDContent}
+                  </div>
+                </div>
+              ) : null}
               <canvas
                 ref={canvasRef}
                 id={canvasId}
@@ -2999,9 +4060,47 @@ const HockeyBoard = forwardRef(function HockeyBoard(
                   height: `${fitDisplaySize.h}px`,
                   display: 'block',
                   transform: 'translate(-50%, -50%) rotate(90deg)',
-                  transformOrigin: 'center center'
+                  transformOrigin: 'center center',
+                  opacity: show3dUnderlay ? 0 : 1,
+                  zIndex: show3dUnderlay ? 1 : undefined,
+                  pointerEvents: hitLayerPointerEvents
                 }}
               />
+            </div>
+          ) : show3dUnderlay ? (
+            <div className="board-canvas-stack board-canvas-stack--3d-fill">
+              <div className="board-3d-underlay">{augmentedThreeDContent}</div>
+              <div className="board-2d-hit-layer">
+                <canvas
+                  ref={canvasRef}
+                  id={canvasId}
+                  width={canvasW}
+                  height={canvasH}
+                  onPointerDown={handlePointerDown}
+                  onPointerMove={handleMouseMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerLeave={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
+                  onLostPointerCapture={(e) => {
+                    if (activePointerIdRef.current === e.pointerId) activePointerIdRef.current = null
+                    handleMouseUp(e)
+                  }}
+                  onContextMenu={(e) => e.preventDefault()}
+                  draggable={false}
+                  style={{
+                    WebkitUserDrag: 'none',
+                    userSelect: 'none',
+                    touchAction: canvasTouchAction,
+                    width: '100%',
+                    height: '100%',
+                    display: 'block',
+                    opacity: 0,
+                    pointerEvents: hitLayerPointerEvents,
+                    position: 'relative',
+                    zIndex: 1
+                  }}
+                />
+              </div>
             </div>
           ) : (
             <div
@@ -3039,6 +4138,41 @@ const HockeyBoard = forwardRef(function HockeyBoard(
               />
             </div>
           )
+        ) : show3dUnderlay ? (
+          <div className="board-canvas-stack board-canvas-stack--3d-fill">
+            <div className="board-3d-underlay">{augmentedThreeDContent}</div>
+            <div className="board-2d-hit-layer">
+              <canvas
+                ref={canvasRef}
+                id={canvasId}
+                width={canvasW}
+                height={canvasH}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handleMouseMove}
+                onPointerUp={handlePointerUp}
+                onPointerLeave={handlePointerUp}
+                onPointerCancel={handlePointerUp}
+                onLostPointerCapture={(e) => {
+                  if (activePointerIdRef.current === e.pointerId) activePointerIdRef.current = null
+                  handleMouseUp(e)
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+                draggable={false}
+                style={{
+                  WebkitUserDrag: 'none',
+                  userSelect: 'none',
+                  touchAction: canvasTouchAction,
+                  width: '100%',
+                  height: '100%',
+                  display: 'block',
+                  opacity: 0,
+                  pointerEvents: hitLayerPointerEvents,
+                  position: 'relative',
+                  zIndex: 1
+                }}
+              />
+            </div>
+          </div>
         ) : (
           <canvas
             ref={canvasRef}
@@ -3062,6 +4196,33 @@ const HockeyBoard = forwardRef(function HockeyBoard(
               touchAction: canvasTouchAction
             }}
           />
+        )}
+        {show3dUnderlay && (
+          <div className="board-3d-zoom-rail">
+            <div className="board-3d-zoom-slider-wrap">
+              <input
+                type="range"
+                className="board-3d-zoom-slider"
+                min={RINK3D_ORBIT_MIN_DIST}
+                max={RINK3D_ORBIT_MAX_DIST}
+                step={1}
+                value={
+                  RINK3D_ORBIT_MIN_DIST +
+                  RINK3D_ORBIT_MAX_DIST -
+                  rink3dOrbitDistance
+                }
+                onChange={(e) =>
+                  setRink3dOrbitDistance(
+                    RINK3D_ORBIT_MIN_DIST +
+                      RINK3D_ORBIT_MAX_DIST -
+                      Number(e.target.value)
+                  )
+                }
+                aria-label="Приближение и отдаление катка в 3D"
+                title="Приближение / отдаление"
+              />
+            </div>
+          </div>
         )}
       </div>
       {!readOnly && mobileShellLayout && isMobileToolbar && renderMobileShellBottomDock()}

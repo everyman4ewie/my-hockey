@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import './PaymentTest.css'
+import './PaymentCheckout.css'
 
 export default function PaymentReturn() {
   const [searchParams] = useSearchParams()
@@ -108,15 +108,15 @@ export default function PaymentReturn() {
   }, [searchParams, getToken, navigate])
 
   return (
-    <div className="payment-test-page">
-      <div className="payment-test-container">
-        <header className="payment-test-header">
+    <div className="payment-checkout-page">
+      <div className="payment-checkout-container">
+        <header className="payment-checkout-header">
           <h1>Возврат с оплаты</h1>
-          <p className="payment-test-subtitle">{message}</p>
+          <p className="payment-checkout-subtitle">{message}</p>
         </header>
         {status === 'ok' && <p className="payment-ykassa-note">Сейчас вы будете перенаправлены в кабинет…</p>}
         {status === 'error' && (
-          <button type="button" className="payment-test-btn" onClick={() => navigate('/cabinet?section=tariffs')}>
+          <button type="button" className="payment-checkout-btn" onClick={() => navigate('/cabinet?section=tariffs')}>
             В кабинет
           </button>
         )}

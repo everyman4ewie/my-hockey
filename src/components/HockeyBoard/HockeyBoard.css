@@ -280,7 +280,12 @@
   opacity: 0.85;
 }
 
-.tool-btn--pen {
+.tool-btn--pen,
+.tool-btn--pass-shot,
+.tool-btn--shapes,
+.tool-btn--curve,
+.tool-btn--rink-items,
+.tool-btn--activity {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -288,6 +293,106 @@
   min-width: 2.5rem;
   padding-left: 6px;
   padding-right: 4px;
+}
+
+.tool-btn--pass-shot.active .tool-btn-pen-chevron,
+.tool-btn--shapes.active .tool-btn-pen-chevron,
+.tool-btn--curve.active .tool-btn-pen-chevron,
+.tool-btn--rink-items.active .tool-btn-pen-chevron,
+.tool-btn--activity.active .tool-btn-pen-chevron {
+  color: rgba(255, 255, 255, 0.95);
+  opacity: 1;
+}
+
+/* Вертикальное подменю: иконка сверху, подпись снизу (макет «Бег / передача / бросок») */
+.wave-menu.wave-menu--vertical-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  min-width: 9.5rem;
+  max-width: 13rem;
+}
+
+.wave-menu.wave-menu--vertical-toolbar > button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #475569;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+
+.wave-menu.wave-menu--vertical-toolbar > button:hover {
+  background: #f8fafc;
+}
+
+.wave-menu.wave-menu--vertical-toolbar > button.active {
+  background: #e0f2fe;
+  color: #0ea5e9;
+}
+
+.wave-menu.wave-menu--vertical-toolbar > button svg {
+  flex-shrink: 0;
+  color: currentColor;
+}
+
+.toolbar-submenu-label {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  text-wrap: balance;
+  word-break: break-word;
+  hyphens: auto;
+  line-height: 1.25;
+}
+
+/* «Фигуры»: чуть шире, чтобы «Прямоугольник» умещался */
+.wave-menu.shapes-menu.wave-menu--vertical-toolbar {
+  min-width: 10.75rem;
+  max-width: 13.5rem;
+}
+
+/* «Предметы»: ворота, конус, барьер */
+.wave-menu.rink-items-menu.wave-menu--vertical-toolbar {
+  min-width: 9.5rem;
+  max-width: 12rem;
+}
+
+.wave-menu.activity-menu.wave-menu--vertical-toolbar {
+  min-width: 10.5rem;
+  max-width: 13rem;
+  /* Базовый .wave-menu { overflow: hidden } обрезал верх обводки высоких иконок (развороты). */
+  overflow: visible;
+}
+
+/* «Движение»: длинные подписи стилей */
+.wave-menu-curve.wave-menu--vertical-toolbar {
+  min-width: 11rem;
+  max-width: 15rem;
+}
+
+.wave-direction-check--curve-toolbar {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  border-top: 1px solid #e2e8f0;
+  border-radius: 0 0 6px 6px;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.wave-direction-check--curve-toolbar:hover {
+  background: #f8fafc;
 }
 
 .tool-btn-pen-chevron {
@@ -407,6 +512,208 @@
   justify-content: center;
   overflow: hidden;
   box-sizing: border-box;
+}
+
+/* 3D под невидимым 2D: один слот, размеры не схлопываются при переключении режима */
+.board-canvas-wrap--with-3d.board-canvas-wrap--fit-slot {
+  align-items: stretch;
+}
+
+.board-canvas-wrap--with-3d {
+  position: relative;
+}
+
+/* Вертикальный ползунок масштаба 3D (справа) */
+.board-3d-zoom-rail {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  padding: 6px 4px;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 10px;
+  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.12);
+  box-sizing: border-box;
+  /* После rotate(-90deg) дорожка ~112px по вертикали, по горизонали — толщина ползунка */
+  width: 32px;
+  height: 124px;
+  overflow: hidden;
+}
+
+.board-3d-zoom-slider-wrap {
+  width: 28px;
+  height: 112px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.board-3d-zoom-slider {
+  width: 112px;
+  height: 28px;
+  transform: rotate(-90deg);
+  transform-origin: center center;
+  cursor: pointer;
+  accent-color: #2563eb;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .board-3d-zoom-rail {
+    right: 4px;
+    padding: 4px 2px;
+    width: 28px;
+    height: 100px;
+  }
+  .board-3d-zoom-slider-wrap {
+    width: 24px;
+    height: 88px;
+  }
+  .board-3d-zoom-slider {
+    width: 88px;
+    height: 24px;
+  }
+}
+
+/* Горизонтальный ползунок поворота в 3D (рядом с «Скачать PNG»), визуально как масштаб 3D */
+.board-3d-rotation-toolbar-cluster {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px 8px;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.88);
+  border-radius: 10px;
+  box-shadow: 0 1px 8px rgba(15, 23, 42, 0.12);
+  box-sizing: border-box;
+}
+
+.board-3d-rotation-toolbar-label {
+  font-size: 10px;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  color: #64748b;
+  text-transform: lowercase;
+  text-align: center;
+  user-select: none;
+}
+
+.board-3d-rotation-slider {
+  width: 112px;
+  height: 28px;
+  cursor: pointer;
+  accent-color: #2563eb;
+  flex-shrink: 0;
+}
+
+.toolbar-section.actions .board-3d-rotation-toolbar-cluster {
+  align-self: center;
+}
+
+@media (max-width: 768px) {
+  .board-3d-rotation-slider {
+    width: 88px;
+    height: 24px;
+  }
+}
+
+.board-canvas-stack {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* WebGL + hit-canvas на весь слот (без вложенного уменьшенного rect). */
+.board-canvas-stack--3d-fill {
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+.board-3d-underlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.board-3d-underlay .rink-3d-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.board-3d-underlay--in-rotated {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.board-3d-underlay--in-rotated .rink-3d-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* 3D и 2D в одном rect: WebGL и hit-canvas совпадают с видимой картинкой (иначе клики «плавают»). */
+.board-canvas-display--with-3d-slot {
+  overflow: hidden;
+  border-radius: 8px;
+}
+
+.board-canvas-display--with-3d-slot .board-3d-underlay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.board-canvas-display--with-3d-slot .board-3d-underlay .rink-3d-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.board-3d-underlay--in-rotated-slot {
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.board-3d-underlay--in-rotated-slot .rink-3d-view {
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+.board-2d-hit-layer {
+  position: relative;
+  z-index: 1;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Размеры слоя = contain×множитель; холст 100%×100% — без конфликта с width:100%/height:auto у canvas */

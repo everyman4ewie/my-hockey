@@ -1,26 +1,43 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link, useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useAdminViewAs, ADMIN_VIEW_AS_OPTIONS } from '../context/AdminViewAsContext'
-import { Home, ClipboardList, Activity, Users, Settings, FileText, Video, BookOpen } from 'lucide-react'
+import { Home, ClipboardList, Activity, Users, Settings, FileText, Video, BookOpen, Building2, Mail, MessageCircle, GraduationCap } from 'lucide-react'
 import PageEditor from '../components/PageEditor/PageEditor'
+import AdminHelpCenter from '../components/AdminHelpCenter/AdminHelpCenter'
 import HockeyDecorations from '../components/HockeyDecorations/HockeyDecorations'
 import { TARIFFS, getTariffById, getAdminAssignableTariffs, normalizeTariffId } from '../constants/tariffs'
 import { LANDING_FEATURES_DEFAULTS } from '../constants/landingFeaturesDefaults'
 import { mergeSeo } from '../constants/seoDefaults'
 import { mergeEditorFeatures } from '../utils/mergeLandingFeatures'
 import { authFetch } from '../utils/authFetch'
+import { MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS } from '../constants/tariffLimits'
+import TariffLimitModal from '../components/TariffLimitModal/TariffLimitModal'
 import { useAuthFetchOpts } from '../hooks/useAuthFetchOpts'
 import AdminSeoPanel from '../components/AdminSeoPanel/AdminSeoPanel'
+import {
+  mergeSubscriptionEmailsFromApi,
+  SUBSCRIPTION_EMAIL_DEFAULTS
+} from '../utils/mergeSubscriptionEmails'
 import './Cabinet.css'
 import './AdminCabinet.css'
+
+/** Бейдж тарифа в списке админа: корпоративный уровень организации или личный; при приостановке — эффективный (как у пользователя). */
+function getAdminUserTariffBadge(u) {
+  if (u?.tariffSuspended) {
+    return getTariffById(u.effectiveTariff || 'free')
+  }
+  if (u?.orgTier && u.orgSubscriptionActive) return getTariffById(u.orgTier)
+  return getTariffById(u.tariff || 'free')
+}
 
 function normalizePagesFromApi(data) {
   if (!data || typeof data !== 'object') return {}
   return {
     ...data,
     features: mergeEditorFeatures(data.features, LANDING_FEATURES_DEFAULTS),
-    seo: mergeSeo(data.seo)
+    seo: mergeSeo(data.seo),
+    subscriptionEmails: mergeSubscriptionEmailsFromApi(data.subscriptionEmails)
   }
 }
 
@@ -34,6 +51,7 @@ export default function AdminCabinet() {
   const [section, setSection] = useState('siteStatus')
   const [plansFilter, setPlansFilter] = useState('all') // 'all' | 'boards' | 'plans'
   const [users, setUsers] = useState([])
+  const [usersSearchQuery, setUsersSearchQuery] = useState('')
   const [plans, setPlans] = useState([])
   const [boards, setBoards] = useState([])
   const [videos, setVideos] = useState([])
@@ -54,8 +72,59 @@ export default function AdminCabinet() {
   const [assignTariffId, setAssignTariffId] = useState('pro')
   const [assignExpiresAt, setAssignExpiresAt] = useState('')
   const [assignSaving, setAssignSaving] = useState(false)
+  const [videoDownloadTariffModalOpen, setVideoDownloadTariffModalOpen] = useState(false)
+  const [loadMonitorTab, setLoadMonitorTab] = useState('api')
+  const [organizations, setOrganizations] = useState([])
+  const [orgForm, setOrgForm] = useState({
+    ownerUserId: '',
+    tier: 'corporate_pro',
+    seatLimit: 10,
+    organizationName: '',
+    contactEmail: '',
+    phone: '',
+    contactNote: '',
+    tierExpiresAt: ''
+  })
+  const [orgExpiryDrafts, setOrgExpiryDrafts] = useState({})
+  const [orgExpirySaving, setOrgExpirySaving] = useState(null)
+  const [orgMsg, setOrgMsg] = useState('')
+  const [orgSaving, setOrgSaving] = useState(false)
+  const [supportThreads, setSupportThreads] = useState([])
+  const [supportTotalUnread, setSupportTotalUnread] = useState(0)
+  const [supportSelectedId, setSupportSelectedId] = useState(null)
+  const [supportDetail, setSupportDetail] = useState(null)
+  const [supportDetailLoading, setSupportDetailLoading] = useState(false)
+  const [supportReplyDraft, setSupportReplyDraft] = useState('')
+  const [supportSending, setSupportSending] = useState(false)
+  const [supportError, setSupportError] = useState('')
 
   const token = getToken()
+
+  const loadSupportThreads = useCallback(() => {
+    return fetch('/api/admin/support/threads', { credentials: 'include', headers: { Authorization: token } })
+      .then((r) => r.json())
+      .then((data) => {
+        setSupportThreads(Array.isArray(data.threads) ? data.threads : [])
+        setSupportTotalUnread(Number(data.totalUnreadByAdmin) || 0)
+      })
+      .catch(() => {})
+  }, [token])
+
+  const loadOrganizations = useCallback(() => {
+    fetch('/api/admin/organizations', { credentials: 'include', headers: { Authorization: token } })
+      .then((r) => r.json())
+      .then((list) => {
+        setOrganizations(list)
+        setOrgExpiryDrafts((prev) => {
+          const next = { ...prev }
+          for (const o of list) {
+            if (next[o.id] === undefined) next[o.id] = o.tierExpiresAt?.slice(0, 10) || ''
+          }
+          return next
+        })
+      })
+      .catch(() => setOrganizations([]))
+  }, [token])
 
   const loadUsers = useCallback(() => {
     fetch('/api/admin/users', { credentials: 'include', headers: { Authorization: token } })
@@ -63,6 +132,17 @@ export default function AdminCabinet() {
       .then(setUsers)
       .catch(() => setUsers([]))
   }, [token, authFetchOpts])
+
+  const filteredUsers = useMemo(() => {
+    const needle = usersSearchQuery.trim().toLowerCase()
+    if (!needle) return users
+    return users.filter((u) => {
+      const id = String(u.id ?? '')
+      const login = String(u.login ?? '').toLowerCase()
+      const email = String(u.email ?? '').toLowerCase()
+      return id.toLowerCase().includes(needle) || login.includes(needle) || email.includes(needle)
+    })
+  }, [users, usersSearchQuery])
 
   const loadStats = useCallback(() => {
     fetch('/api/admin/stats', { credentials: 'include', headers: { Authorization: token } })
@@ -110,6 +190,10 @@ export default function AdminCabinet() {
       const res = await authFetch(`/api/user/videos/${v.id}/file`, { ...authFetchOpts })
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}))
+        if (res.status === 403 && errData.code === 'VIDEO_DOWNLOAD_FORBIDDEN') {
+          setVideoDownloadTariffModalOpen(true)
+          return
+        }
         throw new Error(errData.error || 'Не удалось скачать')
       }
       const blob = await res.blob()
@@ -137,13 +221,34 @@ export default function AdminCabinet() {
         name: data.name || ''
       })).catch(() => {}),
       fetch('/api/admin/pages', { credentials: 'include', headers: { Authorization: token } }).then(r => r.json()).then(normalizePagesFromApi).then(setPages).catch(() => setPages({})),
-      authFetch('/api/user/videos', { ...authFetchOpts }).then(r => r.json()).then(v => setVideos(Array.isArray(v) ? v : [])).catch(() => setVideos([]))
+      authFetch('/api/user/videos', { ...authFetchOpts }).then(r => r.json()).then(v => setVideos(Array.isArray(v) ? v : [])).catch(() => setVideos([])),
+      fetch('/api/admin/support/threads', { credentials: 'include', headers: { Authorization: token } })
+        .then((r) => r.json())
+        .then((data) => {
+          setSupportThreads(Array.isArray(data.threads) ? data.threads : [])
+          setSupportTotalUnread(Number(data.totalUnreadByAdmin) || 0)
+        })
+        .catch(() => {})
     ]).finally(() => setLoading(false))
   }, [token, authFetchOpts])
 
   useEffect(() => {
     const s = searchParams.get('section')
-    if (s && ['plans', 'videos', 'siteStatus', 'users', 'profile', 'pages'].includes(s)) {
+    if (
+      s &&
+      [
+        'plans',
+        'videos',
+        'siteStatus',
+        'users',
+        'organizations',
+        'profile',
+        'pages',
+        'subscriptionEmails',
+        'support',
+        'learning'
+      ].includes(s)
+    ) {
       setSection(s)
     }
   }, [searchParams])
@@ -152,9 +257,137 @@ export default function AdminCabinet() {
     if (section === 'plans' || section === 'videos') loadPlans()
   }, [section, loadPlans])
 
+  useEffect(() => {
+    if (section === 'organizations') loadOrganizations()
+  }, [section, loadOrganizations])
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      loadSupportThreads()
+    }, 45000)
+    return () => clearInterval(id)
+  }, [loadSupportThreads])
+
+  useEffect(() => {
+    if (section !== 'support') return
+    const id = setInterval(() => {
+      loadSupportThreads()
+    }, 8000)
+    return () => clearInterval(id)
+  }, [section, loadSupportThreads])
+
+  async function openSupportThread(id) {
+    setSupportSelectedId(id)
+    setSupportDetailLoading(true)
+    setSupportError('')
+    try {
+      const r = await fetch(`/api/admin/support/threads/${encodeURIComponent(id)}`, {
+        credentials: 'include',
+        headers: { Authorization: token }
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.error || 'Не удалось загрузить диалог')
+      setSupportDetail(data.thread)
+      await loadSupportThreads()
+    } catch (e) {
+      setSupportError(e.message || 'Ошибка')
+      setSupportDetail(null)
+    } finally {
+      setSupportDetailLoading(false)
+    }
+  }
+
+  async function handleSupportReply(e) {
+    e.preventDefault()
+    const text = supportReplyDraft.trim()
+    if (!text || !supportSelectedId || supportSending) return
+    setSupportSending(true)
+    setSupportError('')
+    try {
+      const r = await fetch(`/api/admin/support/threads/${encodeURIComponent(supportSelectedId)}/messages`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', Authorization: token },
+        body: JSON.stringify({ text })
+      })
+      const data = await r.json().catch(() => ({}))
+      if (!r.ok) throw new Error(data.error || 'Не удалось отправить')
+      setSupportReplyDraft('')
+      if (data.thread) {
+        setSupportDetail((prev) =>
+          prev && prev.id === supportSelectedId
+            ? {
+                ...prev,
+                messages: data.thread.messages,
+                updatedAt: data.thread.updatedAt
+              }
+            : prev
+        )
+      }
+      await loadSupportThreads()
+    } catch (e) {
+      setSupportError(e.message || 'Ошибка')
+    } finally {
+      setSupportSending(false)
+    }
+  }
+
   function handleLogout() {
     logout()
     navigate('/')
+  }
+
+  async function handleCreateOrganization(e) {
+    e.preventDefault()
+    setOrgSaving(true)
+    setOrgMsg('')
+    try {
+      const res = await fetch('/api/admin/organizations', {
+        credentials: 'include',
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: token },
+        body: JSON.stringify({
+          ownerUserId: orgForm.ownerUserId.trim(),
+          tier: orgForm.tier,
+          seatLimit: Number(orgForm.seatLimit),
+          organizationName: orgForm.organizationName,
+          contactEmail: orgForm.contactEmail,
+          phone: orgForm.phone,
+          contactNote: orgForm.contactNote,
+          tierExpiresAt: orgForm.tierExpiresAt
+        })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Ошибка')
+      setOrgMsg('Организация создана. Владелец получил доступ по уровню организации.')
+      loadOrganizations()
+      loadUsers()
+    } catch (err) {
+      setOrgMsg(err.message || 'Ошибка')
+    } finally {
+      setOrgSaving(false)
+    }
+  }
+
+  async function handleOrgExpirySave(orgId) {
+    const val = orgExpiryDrafts[orgId]
+    setOrgExpirySaving(orgId)
+    try {
+      const res = await fetch(`/api/admin/organizations/${encodeURIComponent(orgId)}`, {
+        credentials: 'include',
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: token },
+        body: JSON.stringify({ tierExpiresAt: val || null })
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || 'Ошибка')
+      await loadOrganizations()
+      loadUsers()
+    } catch (err) {
+      window.alert(err.message || 'Ошибка')
+    } finally {
+      setOrgExpirySaving(null)
+    }
   }
 
   async function handleProfileSave(e) {
@@ -208,8 +441,8 @@ export default function AdminCabinet() {
     }
   }
 
-  async function handlePagesSave(e) {
-    e.preventDefault()
+  async function handlePagesSave(e, opts = {}) {
+    if (e?.preventDefault) e.preventDefault()
     setPagesSaving(true)
     setPagesSuccess('')
     const toSave = {
@@ -220,7 +453,11 @@ export default function AdminCabinet() {
         ...defaultPages.canvasBackgrounds,
         ...(pages.canvasBackgrounds || {})
       },
-      features: mergeEditorFeatures(pages.features, LANDING_FEATURES_DEFAULTS)
+      features: mergeEditorFeatures(pages.features, LANDING_FEATURES_DEFAULTS),
+      subscriptionEmails: {
+        ...mergeSubscriptionEmailsFromApi({}),
+        ...(pages.subscriptionEmails || {})
+      }
     }
     try {
       const res = await fetch('/api/admin/pages', {
@@ -231,12 +468,13 @@ export default function AdminCabinet() {
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(data.error || 'Ошибка сохранения')
+      if (data.pages) setPages(normalizePagesFromApi(data.pages))
       if (toSave.faviconUrl) {
         let link = document.querySelector('link[rel="icon"]')
         if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link) }
         link.href = toSave.faviconUrl
       }
-      setPagesSuccess('Страницы сохранены')
+      setPagesSuccess(opts.successMessage || 'Страницы сохранены')
       setTimeout(() => setPagesSuccess(''), 3000)
     } catch (err) {
       setPagesSuccess('Ошибка: ' + err.message)
@@ -257,7 +495,11 @@ export default function AdminCabinet() {
         ...defaultPages.canvasBackgrounds,
         ...(pages.canvasBackgrounds || {})
       },
-      features: mergeEditorFeatures(pages.features, LANDING_FEATURES_DEFAULTS)
+      features: mergeEditorFeatures(pages.features, LANDING_FEATURES_DEFAULTS),
+      subscriptionEmails: {
+        ...mergeSubscriptionEmailsFromApi({}),
+        ...(pages.subscriptionEmails || {})
+      }
     }
     try {
       const res = await fetch('/api/admin/pages', {
@@ -315,7 +557,9 @@ export default function AdminCabinet() {
     footerLegalInn: 'ИНН: 760402772519',
     footerLegalOgrnip: 'ОГРНИП: 325762700040692',
     footerText: '© Hockey Tactics — платформа для тренеров и хоккеистов',
-    features: LANDING_FEATURES_DEFAULTS.map((f) => ({ ...f }))
+    features: LANDING_FEATURES_DEFAULTS.map((f) => ({ ...f })),
+    tariffLandingFeatures: {},
+    subscriptionEmails: mergeSubscriptionEmailsFromApi({})
   }
 
   return (
@@ -365,6 +609,27 @@ export default function AdminCabinet() {
           </button>
           <button
             type="button"
+            className={`cabinet-nav-item ${section === 'organizations' ? 'active' : ''}`}
+            onClick={() => { setSection('organizations'); loadOrganizations(); }}
+          >
+            <span className="cabinet-nav-icon"><Building2 size={20} /></span>
+            Организации
+          </button>
+          <button
+            type="button"
+            className={`cabinet-nav-item cabinet-nav-item--with-badge ${section === 'support' ? 'active' : ''}`}
+            onClick={() => { setSection('support'); loadSupportThreads(); }}
+          >
+            <span className="cabinet-nav-icon"><MessageCircle size={20} /></span>
+            Поддержка
+            {supportTotalUnread > 0 ? (
+              <span className="admin-nav-support-badge" aria-label={`Непрочитано: ${supportTotalUnread}`}>
+                {supportTotalUnread > 99 ? '99+' : supportTotalUnread}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
             className={`cabinet-nav-item ${section === 'profile' ? 'active' : ''}`}
             onClick={() => setSection('profile')}
           >
@@ -378,6 +643,22 @@ export default function AdminCabinet() {
           >
             <span className="cabinet-nav-icon"><FileText size={20} /></span>
             Редактор страниц
+          </button>
+          <button
+            type="button"
+            className={`cabinet-nav-item ${section === 'learning' ? 'active' : ''}`}
+            onClick={() => setSection('learning')}
+          >
+            <span className="cabinet-nav-icon"><GraduationCap size={20} /></span>
+            Обучение
+          </button>
+          <button
+            type="button"
+            className={`cabinet-nav-item ${section === 'subscriptionEmails' ? 'active' : ''}`}
+            onClick={() => setSection('subscriptionEmails')}
+          >
+            <span className="cabinet-nav-icon"><Mail size={20} /></span>
+            Письма о подписке
           </button>
           <Link
             to="/admin/library"
@@ -661,6 +942,229 @@ export default function AdminCabinet() {
                     <p className="cabinet-loading">Загрузка статистики…</p>
                   ) : (
                     <>
+                      <section className="admin-dash-section admin-load-monitor" aria-labelledby="load-monitor-title">
+                        <div className="admin-load-monitor-intro">
+                          <h3 id="load-monitor-title" className="admin-dash-section-title">Нагрузка сервера и 3D-доска</h3>
+                          <p className="admin-dash-hint admin-load-monitor-hint">
+                            Запросы к API — откуда основная нагрузка на бэкенд. 3D-доска тяжёлая для браузера; ниже — сколько раз её открывали пользователи (по сессиям вкладки).
+                          </p>
+                        </div>
+                        <div className="admin-load-tabs" role="tablist" aria-label="Показатели нагрузки">
+                          {[
+                            { id: 'api', label: 'Запросы к API' },
+                            { id: 'board3d', label: '3D-доска' },
+                            { id: 'content', label: 'Новый контент (7 дней)' },
+                            { id: 'devices', label: 'Устройства' }
+                          ].map((t) => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              role="tab"
+                              aria-selected={loadMonitorTab === t.id}
+                              className={`admin-load-tab${loadMonitorTab === t.id ? ' admin-load-tab--active' : ''}`}
+                              onClick={() => setLoadMonitorTab(t.id)}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                        <div className="admin-load-tab-panel admin-panel admin-panel--elevated" role="tabpanel">
+                          {loadMonitorTab === 'api' && (
+                            <>
+                              {(stats.requestLoad?.sorted?.length ?? 0) === 0 ? (
+                                <p className="admin-dash-empty">
+                                  Пока нет накопленных счётчиков. Данные появятся после обращений к API; нажмите «Обновить» позже.
+                                </p>
+                              ) : (
+                                <div className="admin-request-load-list">
+                                  {(() => {
+                                    const sorted = stats.requestLoad?.sorted || []
+                                    const maxC = Math.max(1, ...sorted.map((r) => r.count))
+                                    return sorted.map((row) => (
+                                      <div key={row.key} className="admin-request-load-row">
+                                        <div className="admin-request-load-label-row">
+                                          <span className="admin-request-load-name">{row.label}</span>
+                                          <span className="admin-request-load-num">
+                                            {row.count}{' '}
+                                            <span className="admin-request-load-pct">({row.pct}%)</span>
+                                          </span>
+                                        </div>
+                                        <div className="admin-tariff-bar-track admin-request-load-track">
+                                          <div
+                                            className="admin-tariff-bar-fill admin-request-load-fill"
+                                            style={{ width: `${Math.max(3, (row.count / maxC) * 100)}%` }}
+                                            title={`${row.label}: ${row.count}`}
+                                          />
+                                        </div>
+                                      </div>
+                                    ))
+                                  })()}
+                                  <p className="admin-dash-footnote admin-request-load-footnote">
+                                    Всего учтённых запросов к API: <strong>{stats.requestLoad?.total ?? 0}</strong>
+                                  </p>
+                                </div>
+                              )}
+                            </>
+                          )}
+                          {loadMonitorTab === 'board3d' && (
+                            <>
+                              <div className="admin-kpi-grid admin-kpi-grid--compact">
+                                <div className="admin-stat-card admin-kpi-card">
+                                  <span className="admin-stat-value">{stats.board3d?.totalOpens ?? 0}</span>
+                                  <span className="admin-stat-label">Открытий 3D (сессии вкладки)</span>
+                                </div>
+                                <div className="admin-stat-card admin-kpi-card">
+                                  <span className="admin-stat-value">{stats.board3d?.uniqueUsers ?? 0}</span>
+                                  <span className="admin-stat-label">Уникальных пользователей (авториз.)</span>
+                                </div>
+                              </div>
+                              {stats.board3d?.opensLast14Days?.length ? (
+                                <div className="admin-chart-block admin-chart-board3d">
+                                  <p className="admin-chart-legend">
+                                    <span className="lg-board3d">Открытия 3D за день</span>
+                                  </p>
+                                  <div className="admin-chart admin-chart-multi admin-chart-board3d-bars">
+                                    {(() => {
+                                      const series = stats.board3d.opensLast14Days
+                                      const max = Math.max(1, ...series.map((d) => d.opens))
+                                      return series.map((d, i) => (
+                                        <div key={i} className="admin-chart-bar-wrap admin-chart-day-cluster">
+                                          <div className="admin-chart-day-bars">
+                                            <div
+                                              className="admin-chart-bar admin-bar-board3d-opens"
+                                              style={{ height: `${Math.max(4, (d.opens / max) * 100)}%` }}
+                                              title={`${d.date}: ${d.opens}`}
+                                            />
+                                          </div>
+                                          <span className="admin-chart-label">
+                                            {new Date(d.date).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}
+                                          </span>
+                                        </div>
+                                      ))
+                                    })()}
+                                  </div>
+                                </div>
+                              ) : null}
+                              {stats.board3d?.bySource && Object.keys(stats.board3d.bySource).length > 0 ? (
+                                <div className="admin-board3d-sources">
+                                  <h4 className="admin-panel-subtitle">Источник</h4>
+                                  <ul className="admin-metric-list">
+                                    {Object.entries(stats.board3d.bySource)
+                                      .sort((a, b) => b[1] - a[1])
+                                      .map(([src, n]) => (
+                                        <li key={src}>
+                                          <span>
+                                            {src === 'tactical-board'
+                                              ? 'Тактическая доска'
+                                              : src === 'tactical-video'
+                                                ? 'Тактическое видео'
+                                                : src === 'plan-canvas'
+                                                  ? 'План-конспект'
+                                                  : src}
+                                          </span>
+                                          <strong>{n}</strong>
+                                        </li>
+                                      ))}
+                                  </ul>
+                                </div>
+                              ) : (stats.board3d?.totalOpens ?? 0) === 0 ? (
+                                <p className="admin-dash-empty admin-board3d-empty">
+                                  Пока нет событий 3D — пользователи ещё не переключались в режим 3D.
+                                </p>
+                              ) : null}
+                            </>
+                          )}
+                          {loadMonitorTab === 'content' && (
+                            <div className="admin-chart-block admin-chart-activity">
+                              <p className="admin-chart-legend">
+                                <span className="lg-users">Регистрации</span>
+                                <span className="lg-plans">Планы</span>
+                                <span className="lg-boards">Доски</span>
+                                <span className="lg-videos">Видео</span>
+                              </p>
+                              <div className="admin-chart admin-chart-multi">
+                                {stats.last7Days?.map((d, i) => {
+                                  const max = Math.max(
+                                    1,
+                                    ...stats.last7Days.flatMap((x) => [x.users, x.plans, x.boards, x.videos])
+                                  )
+                                  return (
+                                    <div key={i} className="admin-chart-bar-wrap admin-chart-day-cluster">
+                                      <div className="admin-chart-day-bars">
+                                        <div
+                                          className="admin-chart-bar admin-bar-users"
+                                          style={{ height: `${Math.max(4, (d.users / max) * 100)}%` }}
+                                          title={`Регистрации: ${d.users}`}
+                                        />
+                                        <div
+                                          className="admin-chart-bar admin-bar-plans"
+                                          style={{ height: `${Math.max(4, (d.plans / max) * 100)}%` }}
+                                          title={`Планы: ${d.plans}`}
+                                        />
+                                        <div
+                                          className="admin-chart-bar admin-bar-boards"
+                                          style={{ height: `${Math.max(4, (d.boards / max) * 100)}%` }}
+                                          title={`Доски: ${d.boards}`}
+                                        />
+                                        <div
+                                          className="admin-chart-bar admin-bar-videos"
+                                          style={{ height: `${Math.max(4, (d.videos / max) * 100)}%` }}
+                                          title={`Видео: ${d.videos}`}
+                                        />
+                                      </div>
+                                      <span className="admin-chart-label">
+                                        {new Date(d.date).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}
+                                      </span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          {loadMonitorTab === 'devices' && (
+                            <>
+                              {(stats.deviceStats?.total ?? 0) === 0 ? (
+                                <p className="admin-dash-empty">Пока нет данных по устройствам.</p>
+                              ) : (
+                                <div className="admin-device-bars">
+                                  {[
+                                    { key: 'mobile', label: 'Смартфоны', icon: 'М' },
+                                    { key: 'tablet', label: 'Планшеты', icon: 'П' },
+                                    { key: 'desktop', label: 'Компьютеры', icon: 'К' }
+                                  ].map(({ key, label, icon }) => {
+                                    const n = stats.deviceStats?.[key] ?? 0
+                                    const pct = stats.deviceStats?.pct?.[key] ?? 0
+                                    const max = Math.max(1, stats.deviceStats?.total ?? 1)
+                                    return (
+                                      <div key={key} className="admin-device-row">
+                                        <span className="admin-device-icon" aria-hidden>{icon}</span>
+                                        <div className="admin-device-body">
+                                          <div className="admin-device-label-row">
+                                            <span className="admin-device-label">{label}</span>
+                                            <span className="admin-device-num">
+                                              {n} <span className="admin-device-pct">({pct}%)</span>
+                                            </span>
+                                          </div>
+                                          <div className="admin-tariff-bar-track admin-device-track">
+                                            <div
+                                              className="admin-tariff-bar-fill admin-device-fill"
+                                              style={{ width: `${(n / max) * 100}%` }}
+                                            />
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                              <p className="admin-dash-footnote">
+                                Подробный журнал по IP — в блоке «Устройства посетителей» ниже.
+                              </p>
+                            </>
+                          )}
+                        </div>
+                      </section>
+
                       <section className="admin-dash-section" aria-labelledby="dash-summary-title">
                         <h3 id="dash-summary-title" className="admin-dash-section-title">Сводка</h3>
                         <div className="admin-kpi-grid admin-kpi-grid--compact">
@@ -776,7 +1280,7 @@ export default function AdminCabinet() {
                         <h3 id="dash-tariffs-title" className="admin-dash-section-title">Тарифы по пользователям</h3>
                         <div className="admin-panel admin-panel-tariffs admin-panel--elevated">
                           <div className="admin-tariff-bars">
-                            {['free', 'pro', 'pro_plus', 'admin'].map((tid) => {
+                            {['free', 'pro', 'pro_plus', 'admin', 'corporate_pro', 'corporate_pro_plus'].map((tid) => {
                               const n = stats.tariffBreakdown?.[tid] ?? 0
                               const label = getTariffById(tid).badge
                               const max = Math.max(1, ...Object.values(stats.tariffBreakdown || {}))
@@ -849,53 +1353,6 @@ export default function AdminCabinet() {
                         </div>
                       </section>
 
-                      <section className="admin-dash-section" aria-labelledby="dash-chart-title">
-                        <h3 id="dash-chart-title" className="admin-dash-section-title">График за 7 дней</h3>
-                        <div className="admin-chart-block admin-chart-activity admin-panel--elevated">
-                          <p className="admin-chart-legend">
-                            <span className="lg-users">Регистрации</span>
-                            <span className="lg-plans">Планы</span>
-                            <span className="lg-boards">Доски</span>
-                            <span className="lg-videos">Видео</span>
-                          </p>
-                          <div className="admin-chart admin-chart-multi">
-                            {stats.last7Days?.map((d, i) => {
-                              const max = Math.max(
-                                1,
-                                ...stats.last7Days.flatMap((x) => [x.users, x.plans, x.boards, x.videos])
-                              )
-                              return (
-                                <div key={i} className="admin-chart-bar-wrap admin-chart-day-cluster">
-                                  <div className="admin-chart-day-bars">
-                                    <div
-                                      className="admin-chart-bar admin-bar-users"
-                                      style={{ height: `${Math.max(4, (d.users / max) * 100)}%` }}
-                                      title={`Регистрации: ${d.users}`}
-                                    />
-                                    <div
-                                      className="admin-chart-bar admin-bar-plans"
-                                      style={{ height: `${Math.max(4, (d.plans / max) * 100)}%` }}
-                                      title={`Планы: ${d.plans}`}
-                                    />
-                                    <div
-                                      className="admin-chart-bar admin-bar-boards"
-                                      style={{ height: `${Math.max(4, (d.boards / max) * 100)}%` }}
-                                      title={`Доски: ${d.boards}`}
-                                    />
-                                    <div
-                                      className="admin-chart-bar admin-bar-videos"
-                                      style={{ height: `${Math.max(4, (d.videos / max) * 100)}%` }}
-                                      title={`Видео: ${d.videos}`}
-                                    />
-                                  </div>
-                                  <span className="admin-chart-label">{new Date(d.date).toLocaleDateString('ru', { day: 'numeric', month: 'short' })}</span>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </div>
-                      </section>
-
                       <section className="admin-dash-section" aria-labelledby="dash-top-title">
                         <h3 id="dash-top-title" className="admin-dash-section-title">Топ по план-конспектам</h3>
                         <div className="admin-panel admin-panel--elevated admin-top-plans-panel">
@@ -929,7 +1386,24 @@ export default function AdminCabinet() {
                                   <li key={u.id}>
                                     <span className="admin-recent-login">{u.login}</span>
                                     <span className="admin-recent-meta">{new Date(u.createdAt).toLocaleString('ru')}</span>
-                                    <span className="admin-tariff-badge admin-tariff-badge-inline">{getTariffById(u.tariff || 'free').badge}</span>
+                                    <span
+                                      className="admin-tariff-badge admin-tariff-badge-inline"
+                                      title={
+                                        u.orgTier && u.organizationName
+                                          ? [
+                                              u.organizationName,
+                                              u.tariffOwnerLogin ? `Владелец тарифа: ${u.tariffOwnerLogin}` : '',
+                                              u.orgTierExpiresAt
+                                                ? `До ${new Date(u.orgTierExpiresAt).toLocaleDateString('ru')}`
+                                                : ''
+                                            ]
+                                              .filter(Boolean)
+                                              .join(' · ')
+                                          : undefined
+                                      }
+                                    >
+                                      {getAdminUserTariffBadge(u).badge}
+                                    </span>
                                     {u.blocked && <span className="admin-user-blocked-badge">Заблок.</span>}
                                   </li>
                                 ))}
@@ -970,10 +1444,35 @@ export default function AdminCabinet() {
                   {users.length === 0 ? (
                     <p className="cabinet-muted">Нет пользователей</p>
                   ) : (
+                    <>
+                      <div className="admin-users-toolbar">
+                        <label className="admin-users-search-wrap">
+                          <span className="admin-users-search-label">Поиск</span>
+                          <input
+                            type="search"
+                            className="admin-users-search-input"
+                            placeholder="По id, логину или email…"
+                            value={usersSearchQuery}
+                            onChange={(e) => setUsersSearchQuery(e.target.value)}
+                            autoComplete="off"
+                            spellCheck={false}
+                            aria-label="Поиск пользователей по id, логину или email"
+                          />
+                        </label>
+                        {usersSearchQuery.trim() && (
+                          <span className="admin-users-search-meta">
+                            Показано {filteredUsers.length} из {users.length}
+                          </span>
+                        )}
+                      </div>
+                      {filteredUsers.length === 0 ? (
+                        <p className="cabinet-muted">Никого не найдено по запросу «{usersSearchQuery.trim()}»</p>
+                      ) : (
                     <div className="admin-users-table-wrap">
                       <table className="admin-users-table">
                         <thead>
                           <tr>
+                            <th className="admin-users-col-id">ID</th>
                             <th>Логин</th>
                             <th>Email</th>
                             <th>Тариф</th>
@@ -983,12 +1482,53 @@ export default function AdminCabinet() {
                           </tr>
                         </thead>
                         <tbody>
-                          {users.map(u => (
+                          {filteredUsers.map(u => (
                             <tr key={u.id} className={u.blocked ? 'admin-user-row-blocked' : undefined}>
+                              <td className="admin-users-col-id admin-mono">{u.id}</td>
                               <td>{u.login}</td>
                               <td>{u.email}</td>
                               <td>
-                                <span className="admin-tariff-badge">{getTariffById(u.tariff || 'free').badge}</span>
+                                <span
+                                  className="admin-tariff-badge"
+                                  title={
+                                    u.orgTier && u.organizationName
+                                      ? [
+                                          u.organizationName,
+                                          u.tariffOwnerLogin ? `Владелец тарифа (продление): ${u.tariffOwnerLogin}` : '',
+                                          u.orgTierExpiresAt
+                                            ? `Подписка орг. до ${new Date(u.orgTierExpiresAt).toLocaleDateString('ru')}`
+                                            : '',
+                                          u.orgRole ? `Роль: ${u.orgRole === 'owner' ? 'владелец' : 'участник'}` : ''
+                                        ]
+                                          .filter(Boolean)
+                                          .join(' · ')
+                                      : undefined
+                                  }
+                                >
+                                  {getAdminUserTariffBadge(u).badge}
+                                </span>
+                                {u.orgTier && !u.tariffSuspended && (
+                                  <span className="admin-tariff-nominal-hint" title="Номинальный личный тариф в записи">
+                                    {' '}
+                                    (личн.: {getTariffById(u.tariff || 'free').badge})
+                                  </span>
+                                )}
+                                {u.orgTier && u.tariffSuspended && (
+                                  <span className="admin-tariff-nominal-hint" title="Организация">
+                                    {' '}
+                                    (орг.: {getTariffById(u.orgTier).badge})
+                                  </span>
+                                )}
+                                {u.organizationName && (
+                                  <div className="admin-users-org-line cabinet-muted">
+                                    {u.organizationName}
+                                    {u.tariffOwnerLogin ? ` · владелец тарифа: ${u.tariffOwnerLogin}` : ''}
+                                    {u.orgTierExpiresAt
+                                      ? ` · до ${new Date(u.orgTierExpiresAt).toLocaleDateString('ru')}`
+                                      : ''}
+                                    {u.orgRole ? ` · ${u.orgRole === 'owner' ? 'владелец' : 'участник'}` : ''}
+                                  </div>
+                                )}
                                 {u.tariffExpiresAt && (
                                   <span className="admin-tariff-exp">до {new Date(u.tariffExpiresAt).toLocaleDateString('ru')}</span>
                                 )}
@@ -1035,6 +1575,12 @@ export default function AdminCabinet() {
                                 <button
                                   type="button"
                                   className="btn-outline btn-sm"
+                                  disabled={!!u.orgSubscriptionActive && u.orgRole !== 'owner'}
+                                  title={
+                                    u.orgSubscriptionActive && u.orgRole !== 'owner'
+                                      ? 'Пока действует корпоративная подписка, тариф участнику менять нельзя (владельцу можно)'
+                                      : undefined
+                                  }
                                   onClick={() => {
                           const tid = normalizeTariffId(u.tariff)
                           setAssignUser(u)
@@ -1105,6 +1651,158 @@ export default function AdminCabinet() {
                         </tbody>
                       </table>
                     </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {section === 'organizations' && (
+                <div className="cabinet-section cabinet-section-full">
+                  <h2>Корпоративные организации</h2>
+                  <p className="cabinet-muted">
+                    После оплаты по счёту создайте организацию: укажите ID пользователя-владельца (из таблицы пользователей), уровень и число мест.
+                  </p>
+                  <form onSubmit={handleCreateOrganization} className="cabinet-form admin-org-create-form">
+                    <div className="form-row">
+                      <label>ID владельца (user id)</label>
+                      <input
+                        type="text"
+                        value={orgForm.ownerUserId}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, ownerUserId: e.target.value }))}
+                        placeholder="например 1730000000000"
+                        required
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Уровень</label>
+                      <select
+                        value={orgForm.tier}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, tier: e.target.value }))}
+                      >
+                        <option value="corporate_pro">Корпоративный Про</option>
+                        <option value="corporate_pro_plus">Корпоративный Про+</option>
+                      </select>
+                    </div>
+                    <div className="form-row">
+                      <label>Число мест</label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={500}
+                        value={orgForm.seatLimit}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, seatLimit: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Название организации</label>
+                      <input
+                        type="text"
+                        value={orgForm.organizationName}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, organizationName: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Почта</label>
+                      <input
+                        type="email"
+                        value={orgForm.contactEmail}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, contactEmail: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Телефон</label>
+                      <input
+                        type="text"
+                        value={orgForm.phone}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, phone: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Контакт для связи</label>
+                      <input
+                        type="text"
+                        value={orgForm.contactNote}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, contactNote: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-row">
+                      <label>Подписка организации действует до</label>
+                      <input
+                        type="date"
+                        value={orgForm.tierExpiresAt}
+                        onChange={(e) => setOrgForm((f) => ({ ...f, tierExpiresAt: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <button type="submit" className="btn-primary" disabled={orgSaving}>
+                      {orgSaving ? 'Создание…' : 'Создать организацию'}
+                    </button>
+                    {orgMsg && <p className="cabinet-success" style={{ marginTop: '0.75rem' }}>{orgMsg}</p>}
+                  </form>
+
+                  <h3 style={{ marginTop: '2rem' }}>Список организаций</h3>
+                  {organizations.length === 0 ? (
+                    <p className="cabinet-muted">Пока нет организаций</p>
+                  ) : (
+                    <div className="admin-users-table-wrap">
+                      <table className="admin-users-table">
+                        <thead>
+                          <tr>
+                            <th>Название</th>
+                            <th>Уровень</th>
+                            <th>Действует до</th>
+                            <th>Места</th>
+                            <th>Владелец</th>
+                            <th>Участники</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {organizations.map((o) => (
+                            <tr key={o.id}>
+                              <td>{o.organizationName || '—'}</td>
+                              <td>{o.tier === 'corporate_pro_plus' ? 'Про+' : 'Про'}</td>
+                              <td className="admin-org-expiry-cell">
+                                <input
+                                  type="date"
+                                  className="admin-org-expiry-input"
+                                  value={orgExpiryDrafts[o.id] ?? o.tierExpiresAt?.slice(0, 10) ?? ''}
+                                  onChange={(e) =>
+                                    setOrgExpiryDrafts((d) => ({ ...d, [o.id]: e.target.value }))
+                                  }
+                                  aria-label={`Дата окончания подписки ${o.organizationName || o.id}`}
+                                />
+                                <button
+                                  type="button"
+                                  className="btn-outline btn-sm"
+                                  disabled={orgExpirySaving === o.id}
+                                  onClick={() => handleOrgExpirySave(o.id)}
+                                >
+                                  {orgExpirySaving === o.id ? '…' : 'Сохранить'}
+                                </button>
+                              </td>
+                              <td>
+                                {o.seatsUsed} / {o.seatLimit}
+                              </td>
+                              <td>
+                                <span className="admin-mono">{o.ownerLogin || '—'}</span>
+                                <span className="cabinet-muted admin-org-owner-id"> ({o.ownerUserId})</span>
+                              </td>
+                              <td>
+                                <ul className="admin-org-member-ul">
+                                  {(o.members || []).map((m) => (
+                                    <li key={m.id}>
+                                      {m.login} ({m.orgRole})
+                                    </li>
+                                  ))}
+                                </ul>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   )}
                 </div>
               )}
@@ -1138,14 +1836,25 @@ export default function AdminCabinet() {
                         ))}
                       </div>
                     </div>
-                    {(assignTariffId === 'pro' || assignTariffId === 'pro_plus' || assignTariffId === 'admin') && (
+                    {(assignTariffId === 'pro' ||
+                      assignTariffId === 'pro_plus' ||
+                      assignTariffId === 'admin' ||
+                      assignTariffId === 'corporate_pro' ||
+                      assignTariffId === 'corporate_pro_plus') && (
                       <div className="form-row">
-                        <label>Действует до (необязательно)</label>
+                        <label>
+                          {assignTariffId === 'corporate_pro' || assignTariffId === 'corporate_pro_plus'
+                            ? 'Действует до (обязательно)'
+                            : 'Действует до (необязательно)'}
+                        </label>
                         <input
                           type="date"
                           value={assignExpiresAt}
                           onChange={e => setAssignExpiresAt(e.target.value)}
                           placeholder="гггг-мм-дд"
+                          required={
+                            assignTariffId === 'corporate_pro' || assignTariffId === 'corporate_pro_plus'
+                          }
                         />
                       </div>
                     )}
@@ -1156,6 +1865,13 @@ export default function AdminCabinet() {
                         className="btn-primary"
                         disabled={assignSaving}
                         onClick={async () => {
+                          if (
+                            (assignTariffId === 'corporate_pro' || assignTariffId === 'corporate_pro_plus') &&
+                            !assignExpiresAt.trim()
+                          ) {
+                            window.alert('Укажите дату окончания корпоративного тарифа')
+                            return
+                          }
                           setAssignSaving(true)
                           try {
                             let exp = assignExpiresAt.trim() || null
@@ -1294,10 +2010,202 @@ export default function AdminCabinet() {
                   </div>
                 </div>
               )}
+
+              {section === 'support' && (
+                <div className="cabinet-section cabinet-section-full admin-support-wrap">
+                  <h2>Поддержка</h2>
+                  <p className="cabinet-muted">
+                    Диалоги с пользователями (иконка «Поддержка» в кабинете). Новые сообщения пользователей отмечаются здесь.
+                  </p>
+                  {supportError ? (
+                    <p className="cabinet-error" role="alert">
+                      {supportError}
+                    </p>
+                  ) : null}
+                  <div className="admin-support-grid">
+                    <div className="admin-support-list-panel">
+                      <h3 className="admin-dash-section-title">Диалоги</h3>
+                      {supportThreads.length === 0 ? (
+                        <p className="cabinet-muted">Пока нет обращений.</p>
+                      ) : (
+                        <ul className="admin-support-thread-list">
+                          {supportThreads.map((t) => (
+                            <li key={t.id}>
+                              <button
+                                type="button"
+                                className={`admin-support-thread-item${supportSelectedId === t.id ? ' admin-support-thread-item--active' : ''}`}
+                                onClick={() => openSupportThread(t.id)}
+                              >
+                                <span className="admin-support-thread-item-title">
+                                  {t.login || t.email || t.userId}
+                                  {Number(t.unreadByAdmin) > 0 ? (
+                                    <span className="admin-support-thread-unread">{t.unreadByAdmin}</span>
+                                  ) : null}
+                                </span>
+                                <span className="admin-support-thread-item-meta">
+                                  {t.updatedAt
+                                    ? new Date(t.updatedAt).toLocaleString('ru-RU', {
+                                        dateStyle: 'short',
+                                        timeStyle: 'short'
+                                      })
+                                    : ''}
+                                </span>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="admin-support-thread-panel">
+                      <h3 className="admin-dash-section-title">Переписка</h3>
+                      {supportDetailLoading ? (
+                        <p className="cabinet-muted">Загрузка…</p>
+                      ) : !supportDetail ? (
+                        <p className="cabinet-muted">Выберите диалог слева.</p>
+                      ) : (
+                        <>
+                          <p className="admin-support-user-line">
+                            <strong>{supportDetail.login || supportDetail.email || supportDetail.userId}</strong>
+                            {supportDetail.email && supportDetail.login ? (
+                              <span className="cabinet-muted"> · {supportDetail.email}</span>
+                            ) : null}
+                          </p>
+                          <ul className="admin-support-messages">
+                            {(supportDetail.messages || []).map((m) => (
+                              <li
+                                key={m.id}
+                                className={`admin-support-msg admin-support-msg--${m.from === 'admin' ? 'admin' : 'user'}`}
+                              >
+                                <span className="admin-support-msg-from">
+                                  {m.from === 'admin' ? 'Поддержка' : 'Пользователь'}
+                                  {m.at
+                                    ? ` · ${new Date(m.at).toLocaleString('ru-RU', {
+                                        dateStyle: 'short',
+                                        timeStyle: 'short'
+                                      })}`
+                                    : ''}
+                                </span>
+                                <p className="admin-support-msg-text">{m.text}</p>
+                              </li>
+                            ))}
+                          </ul>
+                          <form className="admin-support-reply-form" onSubmit={handleSupportReply}>
+                            <label className="admin-field-label" htmlFor="admin-support-reply">
+                              Ответ
+                            </label>
+                            <textarea
+                              id="admin-support-reply"
+                              className="admin-support-reply-textarea"
+                              rows={4}
+                              value={supportReplyDraft}
+                              onChange={(e) => setSupportReplyDraft(e.target.value)}
+                              placeholder="Текст ответа…"
+                              maxLength={4000}
+                              disabled={supportSending}
+                            />
+                            <button type="submit" className="btn-primary" disabled={supportSending || !supportReplyDraft.trim()}>
+                              {supportSending ? 'Отправка…' : 'Отправить'}
+                            </button>
+                          </form>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {section === 'learning' && (
+                <div className="cabinet-section cabinet-section-full">
+                  <h2>Обучение</h2>
+                  <AdminHelpCenter token={token} />
+                </div>
+              )}
+
+              {section === 'subscriptionEmails' && (
+                <div className="cabinet-section cabinet-section-full">
+                  <h2>Письма о подписке</h2>
+                  <p className="cabinet-muted">
+                    Напоминания для тарифов Про / Про+ за 2 дня и за 1 день до окончания периода и письмо после окончания.
+                    Пустое поле — при отправке подставляется текст по умолчанию (подсказка под полем). Ссылка на личный кабинет
+                    (раздел «Тарифы») добавляется в конец письма автоматически.
+                  </p>
+                  <form
+                    className="admin-subscription-emails-form"
+                    onSubmit={(e) => handlePagesSave(e, { successMessage: 'Тексты писем сохранены' })}
+                  >
+                    {[
+                      {
+                        title: 'За 2 дня до окончания',
+                        subjectKey: 'subject2d',
+                        bodyKey: 'body2d'
+                      },
+                      {
+                        title: 'За 1 день до окончания',
+                        subjectKey: 'subject1d',
+                        bodyKey: 'body1d'
+                      },
+                      {
+                        title: 'После окончания подписки',
+                        subjectKey: 'subjectLapsed',
+                        bodyKey: 'bodyLapsed'
+                      }
+                    ].map(({ title, subjectKey, bodyKey }) => (
+                      <fieldset key={subjectKey} className="admin-subscription-emails-fieldset">
+                        <legend>{title}</legend>
+                        <label className="admin-field-label">
+                          Тема письма
+                          <input
+                            type="text"
+                            className="cabinet-input-wide"
+                            value={(pages.subscriptionEmails || {})[subjectKey] ?? ''}
+                            placeholder={SUBSCRIPTION_EMAIL_DEFAULTS[subjectKey]}
+                            onChange={(e) =>
+                              setPages((p) => ({
+                                ...p,
+                                subscriptionEmails: {
+                                  ...mergeSubscriptionEmailsFromApi(p.subscriptionEmails),
+                                  [subjectKey]: e.target.value
+                                }
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="admin-field-label">
+                          Текст
+                          <textarea
+                            className="admin-subscription-emails-textarea"
+                            rows={4}
+                            value={(pages.subscriptionEmails || {})[bodyKey] ?? ''}
+                            placeholder={SUBSCRIPTION_EMAIL_DEFAULTS[bodyKey]}
+                            onChange={(e) =>
+                              setPages((p) => ({
+                                ...p,
+                                subscriptionEmails: {
+                                  ...mergeSubscriptionEmailsFromApi(p.subscriptionEmails),
+                                  [bodyKey]: e.target.value
+                                }
+                              }))
+                            }
+                          />
+                        </label>
+                      </fieldset>
+                    ))}
+                    {pagesSuccess ? <p className="cabinet-form-message" role="status">{pagesSuccess}</p> : null}
+                    <button type="submit" className="btn-primary" disabled={pagesSaving}>
+                      {pagesSaving ? 'Сохранение...' : 'Сохранить'}
+                    </button>
+                  </form>
+                </div>
+              )}
             </>
           )}
         </main>
       </div>
+      <TariffLimitModal
+        open={videoDownloadTariffModalOpen}
+        message={MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS}
+        onClose={() => setVideoDownloadTariffModalOpen(false)}
+      />
     </div>
   )
 }

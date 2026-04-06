@@ -84,6 +84,115 @@
   box-sizing: border-box;
 }
 
+.tactical-board-view-split {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tactical-view-mode-bar {
+  display: flex;
+  gap: 0;
+  padding: 0.35rem 0.5rem;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+  z-index: 50;
+  position: relative;
+}
+
+.tactical-view-mode-header {
+  display: inline-flex;
+  gap: 0;
+  align-items: center;
+  margin-right: 0.35rem;
+  flex-shrink: 0;
+}
+
+.tactical-view-mode-btn {
+  padding: 0.35rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  cursor: pointer;
+  border-radius: 6px;
+  margin-right: 0.35rem;
+}
+
+.tactical-view-mode-btn--active {
+  background: #0f172a;
+  color: #fff;
+  border-color: #0f172a;
+}
+
+.tactical-view-mode-btn--compact {
+  padding: 0.28rem 0.6rem;
+  font-size: 0.78rem;
+  margin-right: 0.25rem;
+}
+
+.tactical-view-mode-btn--3d-locked {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: #64748b;
+  gap: 0.35rem;
+}
+
+.tactical-view-mode-btn--3d-locked:hover {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.tactical-view-mode-btn--3d-locked .tactical-view-mode-lock {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.tactical-board-view-panes {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Одна колонка: HockeyBoard с 2D/3D внутри */
+.tactical-board-view-panes > * {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tactical-board-3d-fallback {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.tactical-board-3d-fallback-spin {
+  animation: tactical-3d-spin 0.9s linear infinite;
+}
+
+@keyframes tactical-3d-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .tactical-board-canvas-wrap .hockey-board {
   flex: 1 1 0;
   min-height: 0;
@@ -137,9 +246,7 @@
   grid-template-rows: minmax(0, 1fr);
 }
 
-.tactical-board-page--mobile-shell.tactical-video-page {
-  grid-template-rows: minmax(0, 1fr) auto;
-}
+/* Мобильное видео (создание): сетка/раскладка — в TacticalVideo.css (flex, иначе схлопывается холст). */
 
 .tactical-board-mobile-error {
   flex-shrink: 0;

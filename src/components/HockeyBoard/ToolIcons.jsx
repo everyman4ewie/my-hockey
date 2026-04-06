@@ -1,4 +1,64 @@
+import { U_TURN_LINE_PATH_D, U_TURN_ARROW_PATH_D } from '../../utils/uTurnIconPath'
+import { DROP_PASS_PATH_D } from '../../utils/dropPassIconPath'
+
 const size = 20
+/** Размер квадрата svg в тулбаре (подменю / главная кнопка активности). */
+const U_TURN_TOOLBAR_PX = Math.round(size * 0.82)
+/**
+ * ViewBox шире базового U_TURN_VIEWBOX: запас ~2 ед. с каждой стороны под обводку stroke и сглаживание,
+ * иначе у svg по умолчанию overflow:hidden и верх/низ обрезаются. Путь d не меняется.
+ */
+const U_TURN_TOOLBAR_VIEWBOX = '-4 -14 28 36'
+
+/** Как drawActivityTurnIcon2D: две дуги + «бросок» (белая заливка, обводка). */
+function makeCurvedTurnShotPathD() {
+  const sc = 1
+  const shaftHalf = 4 * sc
+  const headHalf = 7 * sc
+  const headLen = 14 * sc
+  const R = 10 * sc
+  const cx = -3.5 * sc
+  const cy = 5 * sc
+  const θTip = -Math.PI / 2
+  const θNeck = θTip + headLen / R
+  const θStart = Math.PI
+  const ro = R + shaftHalf
+  const ri = R - shaftHalf
+  const tipX = cx + R * Math.cos(θTip)
+  const tipY = cy + R * Math.sin(θTip)
+  const neckCx = cx + R * Math.cos(θNeck)
+  const neckCy = cy + R * Math.sin(θNeck)
+  const chordAngle = Math.atan2(tipY - neckCy, tipX - neckCx)
+  const perpX = -Math.sin(chordAngle)
+  const perpY = Math.cos(chordAngle)
+  const baseX = tipX - headLen * Math.cos(chordAngle)
+  const baseY = tipY - headLen * Math.sin(chordAngle)
+  const n2x = cx + ri * Math.cos(θNeck)
+  const n2y = cy + ri * Math.sin(θNeck)
+  const w1x = baseX - perpX * headHalf
+  const w1y = baseY - perpY * headHalf
+  const w2x = baseX + perpX * headHalf
+  const w2y = baseY + perpY * headHalf
+  const a1x = cx + ro * Math.cos(θStart)
+  const a1y = cy + ro * Math.sin(θStart)
+  const steps = 20
+  let d = `M ${a1x} ${a1y}`
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps
+    const θ = θStart + t * (θNeck - θStart)
+    d += ` L ${cx + ro * Math.cos(θ)} ${cy + ro * Math.sin(θ)}`
+  }
+  d += ` L ${w1x} ${w1y} L ${tipX} ${tipY} L ${w2x} ${w2y} L ${n2x} ${n2y}`
+  for (let i = steps - 1; i >= 0; i--) {
+    const t = i / steps
+    const θ = θStart + t * (θNeck - θStart)
+    d += ` L ${cx + ri * Math.cos(θ)} ${cy + ri * Math.sin(θ)}`
+  }
+  d += ' Z'
+  return d
+}
+
+const CURVED_TURN_SHOT_PATH_D = makeCurvedTurnShotPathD()
 
 export const SelectIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -25,6 +85,35 @@ export const CurveIcon = () => (
     <path d="M3 8c2 2 4 2 6 0 2-2 4-2 6 0 2 2 4 2 6 0 2-2 4-2 6 0" />
   </svg>
 )
+
+/** Подменю «Движение»: одна волна — ведение шайбы. */
+export const WaveMovementSingleIcon = () => (
+  <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 14c3-4 6-4 9 0s6 4 9 0" />
+  </svg>
+)
+
+/** Две параллельные волны — бег спиной вперёд. */
+export const WaveMovementDoubleIcon = () => (
+  <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 9c2.8-2.5 5.5-2.5 8.5 0s5.7 2.5 8.5 0" />
+    <path d="M2 17c2.8-2.5 5.5-2.5 8.5 0s5.7 2.5 8.5 0" />
+  </svg>
+)
+
+/** Пунктирные двойные волны — бег спиной с шайбой. */
+export const WaveMovementDashedDoubleIcon = () => (
+  <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="2.5 3">
+    <path d="M2 9c2.8-2.5 5.5-2.5 8.5 0s5.7 2.5 8.5 0" />
+    <path d="M2 17c2.8-2.5 5.5-2.5 8.5 0s5.7 2.5 8.5 0" />
+  </svg>
+)
+
+export const WAVE_MOVEMENT_ICONS = {
+  single: WaveMovementSingleIcon,
+  double: WaveMovementDoubleIcon,
+  dashedDouble: WaveMovementDashedDoubleIcon
+}
 
 export const LateralIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -71,6 +160,15 @@ export const CircleIcon = () => (
   </svg>
 )
 
+/** Общая кнопка «Фигуры»: линия, прямоугольник, круг — в подменю. */
+export const ShapesIcon = () => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="8" height="8" rx="1.5" />
+    <circle cx="17" cy="10" r="4" />
+    <line x1="5" y1="20" x2="19" y2="14" />
+  </svg>
+)
+
 export const EraserIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M20 20H7L3 16l10-10 7 7-7 7z" />
@@ -81,14 +179,14 @@ export const EraserIcon = () => (
 export const PlayerIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="6" />
-    <text x="12" y="16" fill="currentColor" fontSize="10" fontWeight="bold" textAnchor="middle">И</text>
+    <text x="12" y="15.5" fill="currentColor" fontSize="9.5" fontWeight="400" fontFamily="system-ui, -apple-system, Segoe UI, sans-serif" textAnchor="middle">И</text>
   </svg>
 )
 
 export const PlayerTriangleIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M12 4 L20 18 L4 18 Z" />
-    <text x="12" y="14" fill="currentColor" fontSize="7" fontWeight="bold" textAnchor="middle">И</text>
+    <text x="12" y="14" fill="currentColor" fontSize="8" fontWeight="400" fontFamily="system-ui, -apple-system, Segoe UI, sans-serif" textAnchor="middle">И</text>
   </svg>
 )
 
@@ -133,14 +231,14 @@ export const GoalIcon = () => (
 export const ForwardIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <circle cx="12" cy="12" r="6" />
-    <text x="12" y="16" fill="currentColor" fontSize="10" fontWeight="bold" textAnchor="middle">Н</text>
+    <text x="12" y="15.5" fill="currentColor" fontSize="9.5" fontWeight="400" fontFamily="system-ui, -apple-system, Segoe UI, sans-serif" textAnchor="middle">Н</text>
   </svg>
 )
 
 export const DefenderIcon = () => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <path d="M12 4 L20 18 L4 18 Z" />
-    <text x="12" y="14" fill="currentColor" fontSize="8" fontWeight="bold" textAnchor="middle">З</text>
+    <text x="12" y="14" fill="currentColor" fontSize="8.5" fontWeight="400" fontFamily="system-ui, -apple-system, Segoe UI, sans-serif" textAnchor="middle">З</text>
   </svg>
 )
 
@@ -156,6 +254,127 @@ export const BarrierIcon = () => (
     <line x1="7" y1="8" x2="17" y2="8" />
     <line x1="7" y1="8" x2="7" y2="16" />
     <line x1="17" y1="8" x2="17" y2="16" />
+  </svg>
+)
+
+/** Поворот направо — как «бросок», изогнутый (две полосы + головка). */
+export const TurnRightIcon = () => (
+  <svg width={size} height={size} viewBox="-18 -10 40 40" fill="none" aria-hidden>
+    <path
+      d={CURVED_TURN_SHOT_PATH_D}
+      fill="#ffffff"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="miter"
+      strokeLinecap="butt"
+    />
+  </svg>
+)
+
+/** Поворот налево — зеркально. */
+export const TurnLeftIcon = () => (
+  <svg width={size} height={size} viewBox="-18 -10 40 40" fill="none" aria-hidden>
+    <g transform="translate(2,0) scale(-1,1) translate(-2,0)">
+      <path
+        d={CURVED_TURN_SHOT_PATH_D}
+        fill="#ffffff"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="miter"
+        strokeLinecap="butt"
+      />
+    </g>
+  </svg>
+)
+
+/** Разворот направо — одна линия вверх, широкая дуга, коротко вниз, шеврон (референс). */
+export const UTurnRightIcon = () => (
+  <svg
+    width={U_TURN_TOOLBAR_PX}
+    height={U_TURN_TOOLBAR_PX}
+    viewBox={U_TURN_TOOLBAR_VIEWBOX}
+    fill="none"
+    overflow="visible"
+    aria-hidden
+  >
+    <path
+      d={U_TURN_LINE_PATH_D}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="round"
+      strokeLinecap="round"
+    />
+    <path
+      d={U_TURN_ARROW_PATH_D}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinejoin="miter"
+      strokeLinecap="butt"
+    />
+  </svg>
+)
+
+/** Разворот налево — зеркально по горизонтали. */
+export const UTurnLeftIcon = () => (
+  <svg
+    width={U_TURN_TOOLBAR_PX}
+    height={U_TURN_TOOLBAR_PX}
+    viewBox={U_TURN_TOOLBAR_VIEWBOX}
+    fill="none"
+    overflow="visible"
+    aria-hidden
+  >
+    <g transform="translate(10,0) scale(-1,1) translate(-10,0)">
+      <path
+        d={U_TURN_LINE_PATH_D}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+      <path
+        d={U_TURN_ARROW_PATH_D}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="miter"
+        strokeLinecap="butt"
+      />
+    </g>
+  </svg>
+)
+
+/** Передача паса — контур как в drop_pass.svg. */
+export const DropPassIcon = () => (
+  <svg width={size} height={size} viewBox="4 -3 28 24" fill="currentColor" aria-hidden>
+    <g transform="translate(10.6,14.35)">
+      <g transform="translate(2.9263452,-1.5986548)">
+        <path d={DROP_PASS_PATH_D} />
+      </g>
+    </g>
+  </svg>
+)
+
+/** Группа «Активность» в тулбаре. */
+export const ActivityGroupIcon = () => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 16.5C4 7 11 5 14 11" />
+    <path d="M20 16.5C20 7 13 5 10 11" />
+  </svg>
+)
+
+/** Группа «Предметы»: ворота, конус, барьер — в подменю. */
+export const RinkItemsIcon = () => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M2 15 A 8 8 0 0 1 10 15 L 10 17 L 2 17 Z" fill="#d1d5db" stroke="currentColor" />
+    <line x1="14" y1="17" x2="20" y2="17" />
+    <line x1="17" y1="17" x2="17" y2="7" />
+    <line x1="14" y1="9" x2="20" y2="9" />
+    <line x1="14" y1="9" x2="14" y2="15" />
+    <line x1="20" y1="9" x2="20" y2="15" />
   </svg>
 )
 
@@ -188,9 +407,13 @@ export const toolIcons = {
   select: SelectIcon,
   pen: PenIcon,
   line: LineIcon,
+  /** Группа в тулбаре; на кнопке — иконка текущего line / rect / circle. */
+  shapes: ShapesIcon,
   curve: CurveIcon,
   lateral: LateralIcon,
   arrow: ArrowIcon,
+  /** Группа в тулбаре; иконка — по активному arrow / pass / shot. */
+  passShot: ArrowIcon,
   pass: PassIcon,
   shot: ShotIcon,
   rect: RectIcon,
@@ -206,5 +429,13 @@ export const toolIcons = {
   defender: DefenderIcon,
   goal: GoalIcon,
   cone: ConeIcon,
-  barrier: BarrierIcon
+  barrier: BarrierIcon,
+  /** Группа в тулбаре; на кнопке — иконка текущего goal / cone / barrier. */
+  rinkItems: RinkItemsIcon,
+  turnRight: TurnLeftIcon,
+  turnLeft: TurnRightIcon,
+  uTurnRight: UTurnRightIcon,
+  uTurnLeft: UTurnLeftIcon,
+  dropPass: DropPassIcon,
+  activity: ActivityGroupIcon
 }

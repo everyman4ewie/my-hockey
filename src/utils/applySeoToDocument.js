@@ -5,6 +5,13 @@
 
 const ATTR = 'data-app-seo'
 
+/** Безопасная подстановка в CSS-селектор; fallback для окружений без CSS.escape. */
+function escapeCssAttrSelector(value) {
+  const s = typeof value === 'string' ? value : String(value ?? '')
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(s)
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
 function absUrl(maybe, origin) {
   if (!maybe || typeof maybe !== 'string') return ''
   const t = maybe.trim()
@@ -16,7 +23,7 @@ function absUrl(maybe, origin) {
 }
 
 function setMetaName(name, content) {
-  const sel = `meta[name="${CSS.escape(name)}"][${ATTR}]`
+  const sel = `meta[name="${escapeCssAttrSelector(name)}"][${ATTR}]`
   let el = document.head.querySelector(sel)
   if (content === '' || content == null) {
     if (el) el.remove()
@@ -32,7 +39,7 @@ function setMetaName(name, content) {
 }
 
 function setMetaProperty(property, content) {
-  const sel = `meta[property="${CSS.escape(property)}"][${ATTR}]`
+  const sel = `meta[property="${escapeCssAttrSelector(property)}"][${ATTR}]`
   let el = document.head.querySelector(sel)
   if (content === '' || content == null) {
     if (el) el.remove()
@@ -48,7 +55,7 @@ function setMetaProperty(property, content) {
 }
 
 function setLinkRel(rel, href, extra = {}) {
-  const sel = `link[rel="${CSS.escape(rel)}"][${ATTR}]`
+  const sel = `link[rel="${escapeCssAttrSelector(rel)}"][${ATTR}]`
   let el = document.head.querySelector(sel)
   if (!href) {
     if (el) el.remove()

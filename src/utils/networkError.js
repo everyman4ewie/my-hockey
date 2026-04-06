@@ -55,7 +55,12 @@ export function isFetchNetworkFailure(err) {
 /** Короткий текст для любых API-запросов (логин, профиль, списки). */
 export function formatGenericFetchError(err) {
   if (isFetchNetworkFailure(err)) {
-    return 'Нет связи с сервером. Проверьте интернет и попробуйте снова.'
+    let msg = 'Нет связи с сервером. Проверьте интернет и попробуйте снова.'
+    if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
+      msg +=
+        ' Локально: в отдельном терминале должен быть запущен API (npm run server, порт из .env PORT или 3002), сайт открывайте через http://localhost:5173 (npm run dev) или используйте npm run dev:all. Если порт API занят другим процессом, задайте в .env тот же PORT, на котором реально слушает сервер (см. консоль при старте).'
+    }
+    return msg
   }
   return err?.message || 'Не удалось выполнить запрос'
 }

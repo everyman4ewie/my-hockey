@@ -27,13 +27,26 @@ import {
 } from '../utils/boardCoordinates'
 import { FIELD_OPTIONS } from '../components/FieldZoneSelector/FieldZoneSelector'
 import { isFieldZoneLockedForTariff, FIELD_ZONE_UPGRADE_TOOLTIP } from '../constants/fieldZones'
-import { getTariffLimits } from '../constants/tariffLimits'
+import {
+  getTariffLimits,
+  canUseBoard3dVisualization,
+  BOARD_3D_TARIFF_MESSAGE,
+  MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS
+} from '../constants/tariffLimits'
+import { normalizeTariffId } from '../constants/tariffs'
 import '../components/FieldZoneSelector/FieldZoneSelector.css'
 import TariffLimitModal from '../components/TariffLimitModal/TariffLimitModal'
 import { openLibraryOrWarn } from '../utils/libraryDesktopOnly'
 import { LIBRARY_BOARD_IMPORT_KEY } from '../utils/libraryBoardImport'
+import { reportBoard3dUsageOnce } from '../utils/analyticsBoard3d'
+import { usePreloadIcon3dWhenIdle } from '../hooks/usePreloadIcon3dWhenIdle'
 import './TacticalBoard.css'
 import './TacticalVideo.css'
+import {
+  Board2D3DShell,
+  BoardViewModeHeaderToggle,
+  Rink3DViewSuspense
+} from '../components/Rink3D/Board2D3DShell.jsx'
 
 const MSG_DEFAULT = 'Операция недоступна по тарифу. Откройте раздел «Тарифы» в кабинете.'
 
@@ -87,7 +100,7 @@ export default function TacticalVideo() {
   const { user, loading: authLoading } = useAuth()
   const authFetchOpts = useAuthFetchOpts()
   const { profile, refreshProfile } = useProfile()
-  const { canvasBackgrounds, canvasSize: canvasSizeSettings } = useCanvasSettings()
+  const { canvasBackgrounds, canvas3dLayouts, canvasSize: canvasSizeSettings } = useCanvasSettings()
   const headerRef = useRef(null)
   const [tacticalHeaderH, setTacticalHeaderH] = useState(56)
   const fieldSelectRef = useRef(null)
@@ -96,6 +109,7 @@ export default function TacticalVideo() {
   const [paths, setPaths] = useState([])
   const [icons, setIcons] = useState([])
   const [fieldZone, setFieldZone] = useState('full')
+  const [viewMode, setViewMode] = useState('2d')
   const [fieldSelectOpen, setFieldSelectOpen] = useState(false)
   const [keyframes, setKeyframes] = useState([])
   const [playbackSpeed, setPlaybackSpeed] = useState(1)
@@ -107,6 +121,8 @@ export default function TacticalVideo() {
   const playbackSessionRef = useRef(0)
   const exportLockRef = useRef(false)
   const loadedServerVideoIdRef = useRef(null)
+  /** Canvas WebGL из Rink3D — запись экспорта в режиме 3D (иначе MediaRecorder снимает пустой 2D-слой). */
+  const webglCanvasExportRef = useRef(null)
 
   const fromBoardId = searchParams.get('from')
   const videoIdParam = searchParams.get('videoId')
@@ -119,6 +135,9 @@ export default function TacticalVideo() {
   const [tariffModalOpen, setTariffModalOpen] = useState(false)
   const [tariffModalMessage, setTariffModalMessage] = useState('')
   const [videoReadOnly, setVideoReadOnly] = useState(false)
+  /** Только на время экспорта MP4 в 3D на телефоне — монтируем WebGL (редактирование в 3D по-прежнему недоступно). */
+  const [temporaryMobile3dExport, setTemporaryMobile3dExport] = useState(false)
+  const [mobileExportFormatModalOpen, setMobileExportFormatModalOpen] = useState(false)
 
   const isMobileShell = useMediaQuery('(max-width: 768px)')
   const storyBarRef = useRef(null)
@@ -382,6 +401,20 @@ export default function TacticalVideo() {
     setIcons(normalizeIcons(cleaned.icons, w, h))
   }, [canvasSize.w, canvasSize.h, playing, exporting, videoReadOnly])
 
+  const handleIconMove3d = useCallback(
+    (iconId, u, v) => {
+      if (playing || exporting || videoReadOnly) return
+      setIcons((prev) => prev.map((ic) => (ic.id === iconId ? { ...ic, x: u, y: v } : ic)))
+    },
+    [playing, exporting, videoReadOnly]
+  )
+
+  const layers3dVideo = useMemo(() => {
+    const srcPaths = playDisplay ? playDisplay.paths : paths
+    const srcIcons = playDisplay ? playDisplay.icons : icons
+    return [{ id: 'video', paths: srcPaths, icons: srcIcons, dimmed: false }]
+  }, [playDisplay, paths, icons])
+
   const pathsPx = useMemo(() => {
     const srcPaths = playDisplay ? playDisplay.paths : paths
     return denormalizePaths(srcPaths, canvasSize.w, canvasSize.h)
@@ -393,6 +426,33 @@ export default function TacticalVideo() {
   }, [playDisplay, icons, canvasSize.w, canvasSize.h])
 
   const activeFieldZone = playDisplay?.fieldZone ?? fieldZone
+  const view3dAvailable = activeFieldZone === 'full'
+  const tariffAllows3d = canUseBoard3dVisualization(profile?.effectiveTariff ?? profile?.tariff)
+  /** На телефоне 3D только при экспорте в 3D (temporaryMobile3dExport); иначе 2D. */
+  const view3dUsable = view3dAvailable && tariffAllows3d && (!isMobileShell || temporaryMobile3dExport)
+
+  /** Про+ / Корп Про+: перед скачиванием на мобильном — выбор 2D / 3D. */
+  const canChooseMobileExport2d3d = useMemo(() => {
+    if (user?.isAdmin && authFetchOpts.viewAs == null) return true
+    const tid = normalizeTariffId(profile?.effectiveTariff ?? profile?.tariff ?? 'free')
+    return tid === 'pro_plus' || tid === 'corporate_pro_plus'
+  }, [user?.isAdmin, authFetchOpts.viewAs, profile?.effectiveTariff, profile?.tariff])
+
+  const mobileExportNeedsFormatModal =
+    isMobileShell &&
+    canChooseMobileExport2d3d &&
+    view3dAvailable &&
+    tariffAllows3d
+  const board3dTariffLocked = view3dAvailable && !tariffAllows3d
+  const boardViewMode = view3dUsable ? viewMode : '2d'
+  useEffect(() => {
+    if (!view3dUsable && viewMode === '3d') setViewMode('2d')
+  }, [view3dUsable, viewMode])
+  useEffect(() => {
+    if (boardViewMode === '3d') reportBoard3dUsageOnce('tactical-video')
+  }, [boardViewMode])
+
+  usePreloadIcon3dWhenIdle(view3dUsable && activeFieldZone === 'full', {})
 
   useEffect(() => {
     if (!playing) {
@@ -467,24 +527,65 @@ export default function TacticalVideo() {
     setPlayDisplay(null)
   }, [])
 
-  /** Одна запись canvas → blob (MP4 или WebM — что выбрал pickRecorderMimeType). */
-  const recordProjectVideo = useCallback(async () => {
-    const canvas = document.getElementById('tactical-video-canvas')
-    if (!canvas) throw new Error('Нет canvas')
-    const segMs = Math.max(200, segmentSec * 1000)
-    const totalMs = (keyframes.length - 1) * segMs
-    const computeFrame = (elapsedMs) =>
-      interpolateKeyframesAtMs(keyframes, segmentSec, elapsedMs)
-    const { blob, mime } = await recordCanvasAnimation({
-      canvas,
-      totalMs,
-      computeFrame,
-      applyFrame: (frame) => {
-        flushSync(() => setPlayDisplay(frame))
+  const onWebGLCanvasReadyForExport = useCallback((el) => {
+    webglCanvasExportRef.current = el
+  }, [])
+
+  /**
+   * Одна запись canvas → blob. exportModeOverride: явный режим (моб. выбор 2D/3D); иначе boardViewMode.
+   * В 3D — WebGL, иначе пустой 2D-слой в файле.
+   */
+  const recordProjectVideo = useCallback(
+    async (exportModeOverride) => {
+      const mode = exportModeOverride ?? boardViewMode
+      const canvas2d = document.getElementById('tactical-video-canvas')
+      if (!canvas2d) throw new Error('Нет canvas')
+
+      let canvas = canvas2d
+      if (mode === '3d') {
+        let gl = webglCanvasExportRef.current
+        if (!gl) {
+          for (let i = 0; i < 120; i++) {
+            await new Promise((r) => requestAnimationFrame(r))
+            gl = webglCanvasExportRef.current
+            if (gl) break
+          }
+        }
+        if (!gl) {
+          throw new Error(
+            '3D-сцена ещё не готова к записи. Дождитесь отображения катка и повторите экспорт.'
+          )
+        }
+        canvas = gl
       }
-    })
-    return { blob, mime, totalMs }
-  }, [keyframes, segmentSec])
+
+      const segMs = Math.max(200, segmentSec * 1000)
+      const totalMs = (keyframes.length - 1) * segMs
+      const computeFrame = (elapsedMs) =>
+        interpolateKeyframesAtMs(keyframes, segmentSec, elapsedMs)
+      const { blob, mime, wallMs } = await recordCanvasAnimation({
+        canvas,
+        totalMs,
+        computeFrame,
+        applyFrame: (frame) => {
+          flushSync(() => setPlayDisplay(frame))
+        },
+        paintRafs: mode === '3d' ? 2 : 1
+      })
+      return { blob, mime, totalMs, wallMs }
+    },
+    [keyframes, segmentSec, boardViewMode]
+  )
+
+  const waitForWebGLExportCanvas = useCallback(async () => {
+    let gl = webglCanvasExportRef.current
+    for (let i = 0; i < 180; i++) {
+      await new Promise((r) => requestAnimationFrame(r))
+      gl = webglCanvasExportRef.current
+      if (gl) return gl
+    }
+    return null
+  }, [])
 
   const pushCabinetBlob = useCallback(
     async (outBlob, mime) => {
@@ -542,76 +643,152 @@ export default function TacticalVideo() {
     return getTariffLimits(tid).canSaveDownloadTacticalVideo === true
   }, [user?.isAdmin, authFetchOpts.viewAs, tvLimits, profile?.effectiveTariff, profile?.tariff])
 
+  /** Бесплатный и Про: кнопка «Скачать» с замком; по клику — то же модальное окно, что при лимите тарифа (Про+). */
+  const showDownloadLock = useMemo(() => {
+    if (user?.isAdmin && authFetchOpts.viewAs == null) return false
+    if (canDownloadMp4) return false
+    const tid = normalizeTariffId(profile?.effectiveTariff ?? profile?.tariff ?? 'free')
+    return tid === 'free' || tid === 'pro'
+  }, [user?.isAdmin, authFetchOpts.viewAs, canDownloadMp4, profile?.effectiveTariff, profile?.tariff])
+
+  const showDownloadVideoButton = canDownloadMp4 || showDownloadLock
+
+  /**
+   * @param {'2d'|'3d'|undefined} mobileExportMode — только моб.: явный формат; undefined — как на десктопе (boardViewMode) или 2D на телефоне без выбора.
+   */
+  const executeVideoDownload = useCallback(
+    async (mobileExportMode) => {
+      exportLockRef.current = true
+      setExporting(true)
+      try {
+        let blob
+        let mime
+        let totalMs
+        let wallMs
+
+        if (isMobileShell && mobileExportMode === '3d') {
+          setTemporaryMobile3dExport(true)
+          try {
+            flushSync(() => setViewMode('3d'))
+            const gl = await waitForWebGLExportCanvas()
+            if (!gl) {
+              throw new Error(
+                '3D-сцена не успела загрузиться. Проверьте сеть и повторите.'
+              )
+            }
+            ;({ blob, mime, totalMs, wallMs } = await recordProjectVideo())
+          } finally {
+            flushSync(() => setViewMode('2d'))
+            setTemporaryMobile3dExport(false)
+          }
+        } else {
+          const override =
+            isMobileShell && mobileExportMode === '2d' ? '2d' : undefined
+          ;({ blob, mime, totalMs, wallMs } = await recordProjectVideo(override))
+        }
+
+        const { blob: outBlob, mime: outMime, extension } = await ensurePlayableMp4Blob(
+          blob,
+          mime,
+          totalMs,
+          wallMs
+        )
+        const safeName = (videoTitle.trim() || 'tactic-video').replace(/[\\/:*?"<>|]/g, '').slice(0, 80)
+        const ext = extension || guessRecorderInputExtension(outMime)
+        const baseFile = `${safeName || 'tactic-video'}-${Date.now()}`
+        triggerBlobDownload(outBlob, `${baseFile}.${ext}`)
+
+        const autoSave =
+          !!((user?.isAdmin && authFetchOpts.viewAs == null) || tvLimits?.autoSaveOnDownload || tvLimits?.unlimitedCabinet) &&
+          !videoReadOnly
+        if (autoSave && user?.id) {
+          try {
+            await pushCabinetBlob(outBlob, outMime)
+          } catch (e) {
+            if (e?.code === 'AUTH') {
+              window.alert(
+                'Войдите в аккаунт, чтобы сохранить копию в кабинете. Файл уже скачан на устройство.'
+              )
+            } else if (e?.code === 'NETWORK') {
+              window.alert(
+                'Файл уже скачан на устройство.\n\n' +
+                  (e?.message || 'Не удалось отправить копию в кабинет — проверьте сеть.')
+              )
+            } else if (e?.code && e.code !== 'NETWORK' && e.code !== 'AUTH') {
+              setTariffModalMessage(e.message || MSG_DEFAULT)
+              setTariffModalOpen(true)
+            } else {
+              window.alert(
+                'Файл уже скачан на устройство.\n\n' +
+                  (e?.message || 'Не удалось сохранить копию в кабинете на сервере.')
+              )
+            }
+          }
+        }
+      } catch (e) {
+        if (e?.code === 'NETWORK' || e?.code === 'AUTH') {
+          window.alert(e?.message || 'Не удалось обработать видео')
+        } else if (e?.code) {
+          setTariffModalMessage(e.message || MSG_DEFAULT)
+          setTariffModalOpen(true)
+        } else {
+          window.alert(e?.message || 'Не удалось обработать видео')
+        }
+      } finally {
+        exportLockRef.current = false
+        flushSync(() => setPlayDisplay(null))
+        setExporting(false)
+      }
+    },
+    [
+      isMobileShell,
+      recordProjectVideo,
+      waitForWebGLExportCanvas,
+      videoTitle,
+      user?.isAdmin,
+      authFetchOpts.viewAs,
+      tvLimits,
+      videoReadOnly,
+      pushCabinetBlob,
+      user?.id
+    ]
+  )
+
   const handleDownloadMp4 = useCallback(async () => {
     if (keyframes.length < 2 || exportLockRef.current) return
     if (!canDownloadMp4) {
-      setTariffModalMessage('Скачивание видео доступно на тарифе Про+.')
-      setTariffModalOpen(true)
+      if (showDownloadLock) {
+        setTariffModalMessage(MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS)
+        setTariffModalOpen(true)
+      }
       return
     }
-    exportLockRef.current = true
-    setExporting(true)
-    try {
-      const { blob, mime, totalMs } = await recordProjectVideo()
-      const { blob: outBlob, mime: outMime, extension } = await ensurePlayableMp4Blob(blob, mime, totalMs)
-      const safeName = (videoTitle.trim() || 'tactic-video').replace(/[\\/:*?"<>|]/g, '').slice(0, 80)
-      const ext = extension || guessRecorderInputExtension(outMime)
-      const baseFile = `${safeName || 'tactic-video'}-${Date.now()}`
-      triggerBlobDownload(outBlob, `${baseFile}.${ext}`)
-
-      const autoSave =
-        !!((user?.isAdmin && authFetchOpts.viewAs == null) || tvLimits?.autoSaveOnDownload || tvLimits?.unlimitedCabinet) &&
-        !videoReadOnly
-      if (autoSave && user?.id) {
-        try {
-          await pushCabinetBlob(outBlob, outMime)
-        } catch (e) {
-          if (e?.code === 'AUTH') {
-            window.alert(
-              'Войдите в аккаунт, чтобы сохранить копию в кабинете. Файл уже скачан на устройство.'
-            )
-          } else if (e?.code === 'NETWORK') {
-            window.alert(
-              'Файл уже скачан на устройство.\n\n' +
-                (e?.message || 'Не удалось отправить копию в кабинет — проверьте сеть.')
-            )
-          } else if (e?.code && e.code !== 'NETWORK' && e.code !== 'AUTH') {
-            setTariffModalMessage(e.message || MSG_DEFAULT)
-            setTariffModalOpen(true)
-          } else {
-            window.alert(
-              'Файл уже скачан на устройство.\n\n' +
-                (e?.message || 'Не удалось сохранить копию в кабинете на сервере.')
-            )
-          }
-        }
-      }
-    } catch (e) {
-      if (e?.code === 'NETWORK' || e?.code === 'AUTH') {
-        window.alert(e?.message || 'Не удалось обработать видео')
-      } else if (e?.code) {
-        setTariffModalMessage(e.message || MSG_DEFAULT)
-        setTariffModalOpen(true)
-      } else {
-        window.alert(e?.message || 'Не удалось обработать видео')
-      }
-    } finally {
-      exportLockRef.current = false
-      flushSync(() => setPlayDisplay(null))
-      setExporting(false)
+    if (mobileExportNeedsFormatModal) {
+      setMobileExportFormatModalOpen(true)
+      return
     }
+    const fallbackMobile2d =
+      isMobileShell && canChooseMobileExport2d3d && !view3dAvailable ? '2d' : undefined
+    await executeVideoDownload(fallbackMobile2d)
   }, [
-    keyframes,
-    videoTitle,
-    user?.isAdmin,
-    authFetchOpts.viewAs,
-    tvLimits,
-    videoReadOnly,
-    recordProjectVideo,
-    pushCabinetBlob,
+    keyframes.length,
     canDownloadMp4,
-    user?.id
+    showDownloadLock,
+    mobileExportNeedsFormatModal,
+    isMobileShell,
+    canChooseMobileExport2d3d,
+    view3dAvailable,
+    executeVideoDownload
   ])
+
+  const confirmMobileExportFormat = useCallback(
+    async (choice) => {
+      setMobileExportFormatModalOpen(false)
+      if (choice !== '2d' && choice !== '3d') return
+      await executeVideoDownload(choice)
+    },
+    [executeVideoDownload]
+  )
 
   const handleSaveToCabinet = useCallback(async () => {
     if (keyframes.length < 2 || exportLockRef.current || videoReadOnly) return
@@ -655,8 +832,8 @@ export default function TacticalVideo() {
     exportLockRef.current = true
     setExporting(true)
     try {
-      const { blob, mime, totalMs } = await recordProjectVideo()
-      const { blob: outBlob, mime: outMime } = await ensurePlayableMp4Blob(blob, mime, totalMs)
+      const { blob, mime, totalMs, wallMs } = await recordProjectVideo()
+      const { blob: outBlob, mime: outMime } = await ensurePlayableMp4Blob(blob, mime, totalMs, wallMs)
       await pushCabinetBlob(outBlob, outMime)
     } catch (e) {
       if (e?.code === 'NETWORK' || e?.code === 'AUTH') {
@@ -797,6 +974,16 @@ export default function TacticalVideo() {
             )}
           </div>
           <div className="tactical-board-header-actions">
+            <BoardViewModeHeaderToggle
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+              view3dAvailable={view3dAvailable}
+              board3dTariffLocked={board3dTariffLocked}
+              onBoard3dLockedAttempt={() => {
+                setTariffModalMessage(BOARD_3D_TARIFF_MESSAGE)
+                setTariffModalOpen(true)
+              }}
+            />
             <button type="button" className="btn-outline" onClick={() => navigate(user?.isAdmin ? '/admin' : '/cabinet?section=videos')}>
               К кабинету
             </button>
@@ -820,9 +1007,41 @@ export default function TacticalVideo() {
           </div>
         </header>
       )}
-      <div className="tactical-board-canvas-wrap">
-        <HockeyBoard
+      <div
+        className={`tactical-board-canvas-wrap tactical-board-canvas-wrap--video-export${boardViewMode === '2d' ? ' tactical-board-canvas-wrap--video-2d' : ''}`}
+      >
+        {exporting && (
+          <div className="tactical-video-export-overlay" role="status" aria-live="polite">
+            <Loader2 className="tactical-video-export-overlay-spin" size={28} strokeWidth={2} aria-hidden />
+            <span>Сборка видео…</span>
+          </div>
+        )}
+        <Board2D3DShell
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          view3dAvailable={view3dAvailable && !isMobileShell}
+          board3dTariffLocked={board3dTariffLocked}
+          onBoard3dLockedAttempt={() => {
+            setTariffModalMessage(BOARD_3D_TARIFF_MESSAGE)
+            setTariffModalOpen(true)
+          }}
+        >
+          <HockeyBoard
+          reserveFixedToolbarPadding={!isMobileShell && boardViewMode === '3d'}
           canvasId="tactical-video-canvas"
+          boardViewMode={boardViewMode}
+          onWebGLCanvasReady={onWebGLCanvasReadyForExport}
+          threeDContent={
+            <Rink3DViewSuspense
+              layers={layers3dVideo}
+              fieldZone={activeFieldZone}
+              canvas3dLayouts={canvas3dLayouts || {}}
+              onIconMove={handleIconMove3d}
+              interactive={!boardLocked}
+              canvasRefWidth={canvasSize.w}
+              canvasRefHeight={canvasSize.h}
+            />
+          }
           paths={pathsPx}
           icons={iconsPx}
           onChange={boardLocked ? undefined : handleChange}
@@ -857,17 +1076,6 @@ export default function TacticalVideo() {
           mobileToolbarChromeRight={
             isMobileShell ? (
               <>
-                {canDownloadMp4 && (
-                  <button
-                    type="button"
-                    className="btn-outline btn-icon-only tactical-video-shell-top-icon"
-                    disabled={keyframes.length < 2 || exporting || limitsPending}
-                    onClick={handleDownloadMp4}
-                    title={exporting ? 'Обработка…' : 'Скачать видео (MP4 или WebM)'}
-                  >
-                    {exporting ? <Loader2 size={18} strokeWidth={2} className="tactical-video-btn-spinner" aria-hidden /> : <Download size={18} strokeWidth={2} aria-hidden />}
-                  </button>
-                )}
                 {showManualSaveButton && (
                   <button
                     type="button"
@@ -945,6 +1153,7 @@ export default function TacticalVideo() {
             </div>
           }
         />
+        </Board2D3DShell>
       </div>
       <div ref={storyBarRef} className="tactical-video-story-bar">
         <div className="tactical-video-story-row">
@@ -1033,19 +1242,39 @@ export default function TacticalVideo() {
                 <Play size={18} strokeWidth={2} aria-hidden />
                 <span className="tactical-video-action-label">Просмотр</span>
               </button>
-              {canDownloadMp4 && (
+              {showDownloadVideoButton && (
                 <button
                   type="button"
-                  className="btn-outline tactical-video-download-btn tactical-video-play-action-btn"
+                  className={`btn-outline tactical-video-download-btn tactical-video-play-action-btn${showDownloadLock ? ' tactical-video-download-btn--pro-locked' : ''}`}
                   disabled={keyframes.length < 2 || exporting}
                   onClick={handleDownloadMp4}
-                  title={exporting ? 'Обработка…' : 'Скачать видео (MP4 или WebM)'}
-                  aria-label={exporting ? 'Обработка видео' : 'Скачать видео'}
+                  title={
+                    exporting
+                      ? 'Обработка…'
+                      : showDownloadLock
+                        ? MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS
+                        : 'Скачать видео (MP4 или WebM)'
+                  }
+                  aria-label={
+                    exporting
+                      ? 'Обработка видео'
+                      : showDownloadLock
+                        ? MSG_TACTICAL_VIDEO_DOWNLOAD_PRO_PLUS
+                        : 'Скачать видео'
+                  }
                 >
                   {exporting ? (
                     <Loader2 size={18} strokeWidth={2} className="tactical-video-btn-spinner" aria-hidden />
                   ) : (
-                    <Download size={18} strokeWidth={2} aria-hidden />
+                    <span
+                      className={`tactical-video-download-icon-wrap tactical-video-download-icon-wrap--labeled${showDownloadLock ? ' tactical-video-download-icon-wrap--with-lock' : ''}`}
+                      aria-hidden
+                    >
+                      {showDownloadLock ? (
+                        <Lock className="tactical-video-download-lock-inline" size={17} strokeWidth={2.5} />
+                      ) : null}
+                      <Download size={18} strokeWidth={2} />
+                    </span>
                   )}
                   <span className="tactical-video-action-label">
                     {exporting ? 'Обработка…' : 'Скачать видео'}
@@ -1082,6 +1311,51 @@ export default function TacticalVideo() {
           </div>
         </div>
       </div>
+      {mobileExportFormatModalOpen ? (
+        <div
+          className="tactical-video-export-format-overlay"
+          onClick={() => setMobileExportFormatModalOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="tactical-video-export-format-modal"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="tactical-video-export-format-title"
+          >
+            <h2 id="tactical-video-export-format-title" className="tactical-video-export-format-title">
+              Формат видео
+            </h2>
+            <p className="tactical-video-export-format-text">
+              2D — плоская схема доски. 3D — запись с компьютерного макета катка (как при просмотре на ПК).
+            </p>
+            <div className="tactical-video-export-format-actions">
+              <button
+                type="button"
+                className="btn-outline tactical-video-export-format-btn"
+                onClick={() => confirmMobileExportFormat('2d')}
+              >
+                2D (схема)
+              </button>
+              <button
+                type="button"
+                className="btn-primary tactical-video-export-format-btn"
+                onClick={() => confirmMobileExportFormat('3d')}
+              >
+                3D (макет)
+              </button>
+            </div>
+            <button
+              type="button"
+              className="tactical-video-export-format-cancel"
+              onClick={() => setMobileExportFormatModalOpen(false)}
+            >
+              Отмена
+            </button>
+          </div>
+        </div>
+      ) : null}
       <TariffLimitModal
         open={tariffModalOpen}
         message={tariffModalMessage}

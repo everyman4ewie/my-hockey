@@ -64,6 +64,11 @@ ssh_deploy() {
   ssh "${SSH_COMMON[@]}" "$DEPLOY_SSH" "$@" || { ssh_fail_hint; exit 1; }
 }
 
+# Только SSH без подсказки «проверьте сеть» — если упала удалённая команда (npm/pm2), это не обязательно сеть.
+ssh_remote_cmd() {
+  ssh "${SSH_COMMON[@]}" "$DEPLOY_SSH" "$@"
+}
+
 rsync_deploy() {
   rsync "$@" || { echo ""; echo "Сбой rsync (часто из‑за SSH до сервера)."; ssh_fail_hint; exit 1; }
 }
@@ -98,9 +103,16 @@ ssh_deploy "mkdir -p '$DEPLOY_PATH/deploy/nginx'"
 rsync_deploy -avz -e "$RSYNC_RSH" ./deploy/nginx/ "$DEPLOY_SSH:$DEPLOY_PATH/deploy/nginx/"
 
 echo "==> .env на сервер не копируется (используется текущий файл на VPS)."
+echo "    Чтобы обновить секреты на сервере: bash scripts/upload-env-to-server.sh"
 
 echo "==> Установка зависимостей и перезапуск PM2 на сервере..."
-ssh_deploy "cd '$DEPLOY_PATH' && npm ci --omit=dev && pm2 restart '$PM2_APP'"
+if ! ssh_remote_cmd "cd '$DEPLOY_PATH' && npm ci --omit=dev && pm2 restart '$PM2_APP'"; then
+  echo ""
+  echo "Ошибка при выполнении команд на сервере (часто это npm ci: package-lock.json не совпадает с package.json)."
+  echo "Локально: npm install && закоммитьте package-lock.json, затем снова npm run deploy:server."
+  echo "Если падение именно на SSH — проверьте сеть и порт: ssh -v $DEPLOY_SSH"
+  exit 1
+fi
 
 echo ""
 echo "Готово. Пользователи и admin.json на сервере не затирались (исключены из rsync); .env на сервере не менялся."
